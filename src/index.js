@@ -1,20 +1,27 @@
 import express from 'express';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import productRoutes from './routes/productRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
+import authRoutes from './routes/authRoutes.js';
 import { rateLimiter } from './middleware/rateLimitMiddleware.js';
 import { structuredLogger } from './middleware/loggerMiddleware.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
-// 1. Structured Logging Middleware (should be first to track all requests)
+// 1. Secure HTTP headers with Helmet (must be first)
+app.use(helmet());
+// 2. Structured Logging Middleware (for correlation IDs & request tracing)
 app.use(structuredLogger);
-// 2. Middleware to parse incoming JSON payloads
+// 3. Parse incoming JSON request bodies & cookies
 app.use(express.json());
-// 3. Apply Redis rate limiter globally
+app.use(cookieParser());
+// 4. Apply Redis rate limiter globally (e.g., 100 requests per 60 seconds)
 app.use(rateLimiter(100, 60));
-// 4. Register your feature routes
+// 5. Register Feature Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
-// Health check route
+// Health check endpoint
 app.get('/', (_req, res) => {
     res.status(200).json({ message: 'Online Store API is running successfully!' });
 });
