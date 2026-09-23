@@ -1,0 +1,1 @@
+{"version":3,"file":"orderModel.d.ts","sourceRoot":"","sources":["orderModel.ts"],"names":[],"mappings":"AAGA,MAAM,WAAW,QAAQ;IACvB,SAAS,EAAE,MAAM,CAAC;IAClB,QAAQ,EAAE,MAAM,CAAC;CAClB;AAED,eAAO,MAAM,WAAW,WAAkB,MAAM,SAAS,QAAQ,EAAE,iBA0DlE,CAAC;AAEF,eAAO,MAAM,iBAAiB,WAAkB,MAAM,mBAGrD,CAAC"}
