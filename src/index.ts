@@ -5,8 +5,9 @@ import cookieParser from 'cookie-parser';
 import productRoutes from './routes/productRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import authRoutes from './routes/authRoutes.js';
-import { rateLimiter } from './middleware/rateLimitMiddleware.js';
+import cartRoutes from './routes/cartRoutes.js';
 import { structuredLogger } from './middleware/loggerMiddleware.js';
+import { lockoutMiddleware } from './middleware/lockoutMiddleware.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,13 +22,13 @@ app.use(structuredLogger);
 app.use(express.json());
 app.use(cookieParser());
 
-// 4. Apply Redis rate limiter globally (e.g., 100 requests per 60 seconds)
-app.use(rateLimiter(100, 60));
+// 4. Apply Mock Redis-backed lockout middleware to authentication routes
+app.use('/api/auth', lockoutMiddleware, authRoutes);
 
 // 5. Register Feature Routes
-app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/cart', cartRoutes);
 
 // Health check endpoint
 app.get('/', (_req: Request, res: Response) => {

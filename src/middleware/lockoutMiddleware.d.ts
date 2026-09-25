@@ -1,4 +1,6 @@
-export declare function checkAccountLockout(email: string): Promise<boolean>;
-export declare function handleFailedLogin(email: string): Promise<void>;
-export declare function resetFailedLogins(email: string): Promise<void>;
+import { type Request, type Response, type NextFunction } from 'express';
+export declare const lockoutMiddleware: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+export declare const checkAccountLockout: (identifier: string) => Promise<boolean>;
+export declare const handleFailedLogin: (identifier: string) => Promise<void>;
+export declare const resetFailedLogins: (identifier: string) => Promise<void>;
 //# sourceMappingURL=lockoutMiddleware.d.ts.map
