@@ -178,6 +178,7 @@ The order-processing architecture illustrates how a customer's cart moves throug
 | `POST` | `/api/auth/register` | Create an account (auto-login, returns tokens) |  None  |
 | `POST` | `/api/auth/login` | Authenticate a user |  None  |
 | `POST` | `/api/auth/refresh` | Rotate access tokens using the refresh token | Cookie |
+| `POST` | `/api/auth/logout` | Invalidate the refresh token and clear auth cookies | Cookie |
 | `GET` | `/api/auth/me` | Get the current authenticated user's profile | Bearer Token |
 
 ### Products
@@ -204,6 +205,7 @@ The order-processing architecture illustrates how a customer's cart moves throug
 | `POST` | `/api/orders/checkout` | Create an order from the current cart (no body needed) | Bearer Token |
 | `GET` | `/api/orders` | Retrieve the user's order history | Bearer Token |
 | `GET` | `/api/orders/:id` | Retrieve a specific order | Bearer Token |
+| `PATCH` | `/api/orders/:id/status` | Admin: update order status (`Pending`, `Paid`, `Shipped`, `Delivered`, `Cancelled`) | Admin |
 
 ---
 
@@ -416,13 +418,9 @@ npm start
 
 Redis-dependent security logic can be tested without a live Redis instance using `ioredis-mock`.
 
-Run the test suite with:
-
-```bash
-npm test
-```
-
 For integration tests, ensure the required PostgreSQL configuration is available in your environment.
+
+> A test suite is not yet included in the repository. Contributions welcome!
 
 ---
 
@@ -511,6 +509,7 @@ The application includes:
 - **Role-based access** for administrative product operations
 - **Environment-based secret management**
 - **Structured request logging**
+- **CORS support** — optional origin allowlist via `CORS_ORIGIN` (comma-separated), credentials enabled
 
 > **Note on Redis:** development uses `ioredis-mock` (in-memory, per-process). Rate-limit and lockout counters reset on server restart and are not shared across cluster nodes. Configure `REDIS_URL` and swap in a real ioredis client in `src/config/redis.ts` for production.
 

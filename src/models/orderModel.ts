@@ -138,3 +138,22 @@ export const getOrderDetailsById = async (
 
   return { ...orderResult.rows[0], items: itemsResult.rows };
 };
+
+const ALLOWED_ORDER_STATUSES = ['Pending', 'Paid', 'Shipped', 'Delivered', 'Cancelled'] as const;
+export type OrderStatus = (typeof ALLOWED_ORDER_STATUSES)[number];
+
+/**
+ * Admin: update an order's status (Pending → Paid → Shipped → Delivered, or Cancelled).
+ * Returns the updated order, or null if the order doesn't exist.
+ */
+export const updateOrderStatus = async (
+  orderId: number,
+  status: OrderStatus
+): Promise<OrderRecord | null> => {
+  const result = await pool.query(
+    `UPDATE orders SET status = $2 WHERE id = $1
+     RETURNING id, user_id, total_amount, status, created_at`,
+    [orderId, status]
+  );
+  return result.rows[0] || null;
+};

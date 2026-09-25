@@ -55,7 +55,9 @@ export const getFilteredProducts = async ({
   if (search) {
     baseQuery += ` AND (name ILIKE $${paramIndex} OR sku ILIKE $${paramIndex})`;
     countQuery += ` AND (name ILIKE $${paramIndex} OR sku ILIKE $${paramIndex})`;
-    values.push(`%${search}%`);
+    // Escape LIKE wildcards so user input like "%" or "_" is matched literally
+    const escaped = search.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+    values.push(`%${escaped}%`);
     paramIndex++;
   }
 

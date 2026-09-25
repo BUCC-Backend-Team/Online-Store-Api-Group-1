@@ -1,42 +1,33 @@
-import express from 'express';
-import type { Request, Response } from 'express';
-import helmet from 'helmet';
-import cookieParser from 'cookie-parser';
-import productRoutes from './routes/productRoutes.js';
-import orderRoutes from './routes/orderRoutes.js';
-import authRoutes from './routes/authRoutes.js';
-import cartRoutes from './routes/cartRoutes.js';
-import { structuredLogger } from './middleware/loggerMiddleware.js';
-import { lockoutMiddleware } from './middleware/lockoutMiddleware.js';
-import { authRateLimiter, generalRateLimiter } from './middleware/rateLimitMiddleware.js';
+import app from './app.js';
+import { checkDatabaseConnection, pool } from './config/db.js';
+import { PORT, isProd } from './config/env.js';
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+async function start(): Promise<void> {
+  // Fail fast: verify DB credentials before accepting traffic
+  try {
+    await checkDatabaseConnection();
+    console.log('Database connection verified');
+  } catch (error) {
+    console.error('FATAL: could not connect to the database:', error);
+    process.exit(1);
+  }
 
-// 1. Secure HTTP headers with Helmet (must be first)
-app.use(helmet());
+  const server = app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT} (${isProd ? 'production' : 'development'})`);
+  });
 
-// 2. Structured Logging Middleware (for correlation IDs & request tracing)
-app.use(structuredLogger);
+  // Graceful shutdown: stop accepting connections, close DB pool
+  const shutdown = async (signal: string) => {
+    console.log(`${signal} received — shutting down`);
+    server.close(async () => {
+      await pool.end();
+      process.exit(0);
+    });
+    // Force-exit if close hangs
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+}
 
-// 3. Parse incoming JSON request bodies & cookies
-app.use(express.json());
-app.use(cookieParser());
-
-// 4. Apply Mock Redis-backed lockout + strict rate limiting to authentication routes
-app.use('/api/auth', lockoutMiddleware, authRateLimiter, authRoutes);
-
-// 5. Register Feature Routes (general rate limiting applied)
-app.use('/api/products', generalRateLimiter, productRoutes);
-app.use('/api/orders', generalRateLimiter, orderRoutes);
-app.use('/api/cart', generalRateLimiter, cartRoutes);
-
-// Health check endpoint
-app.get('/', (_req: Request, res: Response) => {
-  res.status(200).json({ message: 'Online Store API is running successfully!' });
-});
-
-// Start the server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+void start();

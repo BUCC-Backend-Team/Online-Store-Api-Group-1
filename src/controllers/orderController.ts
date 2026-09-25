@@ -4,7 +4,9 @@ import {
   createOrderFromCart,
   getOrdersByUserId,
   getOrderDetailsById,
-  CheckoutError
+  updateOrderStatus,
+  CheckoutError,
+  type OrderStatus
 } from '../models/orderModel.js';
 
 const parseId = (value: unknown): number | null => {
@@ -69,6 +71,34 @@ export const getOrderDetails = async (req: AuthenticatedRequest, res: Response) 
     });
   } catch (error) {
     console.error('Get order details error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+};
+
+// Admin: update an order's status
+export const adminUpdateOrderStatus = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const orderId = parseId(req.params.id);
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: 'Invalid order id.' });
+    }
+
+    const status = req.body?.status as OrderStatus | undefined;
+    const allowed: OrderStatus[] = ['Pending', 'Paid', 'Shipped', 'Delivered', 'Cancelled'];
+    if (!status || !allowed.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `status is required and must be one of: ${allowed.join(', ')}.`
+      });
+    }
+
+    const updated = await updateOrderStatus(orderId, status);
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Order not found.' });
+    }
+    res.status(200).json({ success: true, message: 'Order status updated.', order: updated });
+  } catch (error) {
+    console.error('Update order status error:', error);
     res.status(500).json({ success: false, message: 'Internal server error.' });
   }
 };

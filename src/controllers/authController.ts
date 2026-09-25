@@ -3,9 +3,10 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { checkAccountLockout, handleFailedLogin, resetFailedLogins } from '../middleware/lockoutMiddleware.js';
 import { createUser, findUserByEmail, findUserById, setRefreshToken } from '../models/userModel.js';
+import { JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, isProd } from '../config/env.js';
 
-const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'super-access-secret';
-const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'super-refresh-secret';
+const ACCESS_SECRET = JWT_ACCESS_SECRET;
+const REFRESH_SECRET = JWT_REFRESH_SECRET;
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const BCRYPT_ROUNDS = 10;
@@ -23,9 +24,22 @@ function generateRefreshToken(userId: number): string {
 function setRefreshCookie(res: Response, refreshToken: string): void {
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true, // Prevents JavaScript from reading the cookie (XSS protection)
-    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    secure: isProd, // HTTPS only in production
     sameSite: 'strict', // CSRF protection
     maxAge: REFRESH_COOKIE_MAX_AGE
+  });
+}
+
+function clearAuthCookies(res: Response): void {
+  res.clearCookie('refreshToken', {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'strict'
+  });
+  res.clearCookie('accessToken', {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'strict'
   });
 }
 
@@ -57,6 +71,13 @@ export const registerUser = async (req: Request, res: Response) => {
 
     await setRefreshToken(user.id!, refreshToken);
     setRefreshCookie(res, refreshToken);
+    // Also set the access token as a cookie so verifyToken's cookie fallback works
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'strict',
+      maxAge: 15 * 60 * 1000 // matches the 15m access token expiry
+    });
 
     return res.status(201).json({
       success: true,
@@ -119,6 +140,12 @@ export const loginUser = async (req: Request, res: Response) => {
     // Persist refresh token for rotation/reuse detection
     await setRefreshToken(user.id, refreshToken);
     setRefreshCookie(res, refreshToken);
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'strict',
+      maxAge: 15 * 60 * 1000
+    });
 
     return res.status(200).json({
       success: true,
@@ -160,6 +187,12 @@ export const refreshAccessToken = async (req: Request, res: Response) => {
 
     await setRefreshToken(user.id!, newRefreshToken);
     setRefreshCookie(res, newRefreshToken);
+    res.cookie('accessToken', newAccessToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'strict',
+      maxAge: 15 * 60 * 1000
+    });
 
     return res.status(200).json({ success: true, accessToken: newAccessToken });
   } catch (error) {
@@ -168,7 +201,34 @@ export const refreshAccessToken = async (req: Request, res: Response) => {
   }
 };
 
-// 4. Get current authenticated user's profile
+// 4. Logout: invalidate the stored refresh token and clear cookies
+export const logoutUser = async (req: Request, res: Response) => {
+  try {
+    const incomingRefreshToken = req.cookies?.refreshToken;
+
+    if (incomingRefreshToken) {
+      try {
+        const decoded = jwt.verify(incomingRefreshToken, REFRESH_SECRET) as { userId: number };
+        // Only clear the stored token if it matches (don't invalidate a newer session)
+        const user = await findUserById(decoded.userId);
+        if (user && user.refresh_token === incomingRefreshToken) {
+          await setRefreshToken(user.id!, null);
+        }
+      } catch {
+        // Expired/invalid cookie: nothing stored to invalidate
+      }
+    }
+
+    clearAuthCookies(res);
+    return res.status(200).json({ success: true, message: 'Logged out successfully.' });
+  } catch (error) {
+    console.error('Logout error:', error);
+    clearAuthCookies(res);
+    return res.status(500).json({ success: false, message: 'Internal server error during logout.' });
+  }
+};
+
+// 5. Get current authenticated user's profile
 export const getMe = async (req: Request, res: Response) => {
   try {
     const authUser = (req as any).user as { id: number; email: string; role: string } | undefined;

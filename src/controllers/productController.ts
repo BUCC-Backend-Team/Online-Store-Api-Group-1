@@ -17,10 +17,15 @@ const buildCacheKey = (query: Record<string, unknown>): string => {
 
 export const invalidateProductCache = async (): Promise<void> => {
   try {
-    const keys = await redisClient.keys(`${PRODUCTS_CACHE_KEY}:*`);
-    if (keys.length > 0) {
-      await redisClient.del(...keys);
-    }
+    // SCAN instead of KEYS: non-blocking, safe for production Redis
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await redisClient.scan(cursor, 'MATCH', `${PRODUCTS_CACHE_KEY}:*`, 'COUNT', 100);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        await redisClient.del(...keys);
+      }
+    } while (cursor !== '0');
   } catch (err) {
     console.error('Cache invalidation error:', err);
   }

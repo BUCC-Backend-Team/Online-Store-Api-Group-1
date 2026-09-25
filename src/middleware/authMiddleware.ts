@@ -1,8 +1,8 @@
 import { type Request, type Response, type NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { JWT_ACCESS_SECRET } from '../config/env.js';
 
-// Must match the secret used to sign access tokens in authController.ts
-const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'super-access-secret';
+// Secret comes from src/config/env.ts — same source used to sign tokens in authController.ts
 
 export interface AuthenticatedRequest extends Request {
   user?: {
