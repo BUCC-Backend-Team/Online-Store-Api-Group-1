@@ -2,137 +2,193 @@ import type { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { checkAccountLockout, handleFailedLogin, resetFailedLogins } from '../middleware/lockoutMiddleware.js';
-// Import your PostgreSQL pool
-// import { pool } from '../config/database.js';
+import { createUser, findUserByEmail, findUserById, setRefreshToken } from '../models/userModel.js';
 
 const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'super-access-secret';
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'super-refresh-secret';
 
-// Helper: Generate short-lived Access Token (15 mins)
-function generateAccessToken(userId: string, role: string): string {
-  return jwt.sign({ userId, role }, ACCESS_SECRET, { expiresIn: '15m' });
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const BCRYPT_ROUNDS = 10;
+const REFRESH_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// Token payload must match what authMiddleware.verifyToken decodes: { id, email, role }
+function generateAccessToken(user: { id: number; email: string; role: string }): string {
+  return jwt.sign({ id: user.id, email: user.email, role: user.role }, ACCESS_SECRET, { expiresIn: '15m' });
 }
 
-// Helper: Generate long-lived Refresh Token (7 days)
-function generateRefreshToken(userId: string): string {
+function generateRefreshToken(userId: number): string {
   return jwt.sign({ userId }, REFRESH_SECRET, { expiresIn: '7d' });
 }
 
-// 1. Login Controller with Refresh Token Cookie
+function setRefreshCookie(res: Response, refreshToken: string): void {
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true, // Prevents JavaScript from reading the cookie (XSS protection)
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    sameSite: 'strict', // CSRF protection
+    maxAge: REFRESH_COOKIE_MAX_AGE
+  });
+}
+
+// 1. Register: create user, hash password, auto-login (201 + tokens)
+export const registerUser = async (req: Request, res: Response) => {
+  const { name, email, password } = req.body;
+
+  if (!name || typeof name !== 'string' || name.trim() === '') {
+    return res.status(400).json({ success: false, message: 'Name is required and must be a string.' });
+  }
+
+  if (!email || typeof email !== 'string' || !EMAIL_REGEX.test(email)) {
+    return res.status(400).json({ success: false, message: 'A valid email is required.' });
+  }
+
+  if (!password || typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ success: false, message: 'Password is required and must be at least 8 characters.' });
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  try {
+    // Prevent user enumeration: let the DB unique constraint be the source of truth
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const user = await createUser(name.trim(), normalizedEmail, passwordHash);
+
+    const accessToken = generateAccessToken({ id: user.id!, email: user.email, role: user.role || 'customer' });
+    const refreshToken = generateRefreshToken(user.id!);
+
+    await setRefreshToken(user.id!, refreshToken);
+    setRefreshCookie(res, refreshToken);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Registration successful',
+      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      accessToken
+    });
+  } catch (error: any) {
+    // 23505 = PostgreSQL unique_violation (duplicate email)
+    if (error?.code === '23505') {
+      return res.status(409).json({ success: false, message: 'Email already registered.' });
+    }
+    console.error('Registration error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error during registration.' });
+  }
+};
+
+// 2. Login Controller with Refresh Token Cookie
 export const loginUser = async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+    return res.status(400).json({ success: false, message: 'Email and password are required.' });
   }
 
   try {
     // Check account lockout via Redis
-    const isLocked = await checkAccountLockout(email);
+    const isLocked = await checkAccountLockout(email.toLowerCase());
     if (isLocked) {
       return res.status(429).json({
-        error: 'Too many failed login attempts. Account is temporarily locked for 15 minutes.'
+        success: false,
+        message: 'Too many failed login attempts. Account is temporarily locked for 15 minutes.'
       });
     }
 
-    // Query database for user (uncomment when database pool is imported)
-    // const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-    // const user = result.rows[0];
+    // Look up the user by email
+    const user = await findUserByEmail(email.toLowerCase().trim());
 
-    // Placeholder mock user for demonstration:
-    const user = { id: '1', email: 'test@store.com', role: 'customer', passwordHash: '...' };
-
+    // Same generic response for unknown email and wrong password (no user enumeration)
     if (!user) {
-      await handleFailedLogin(email);
-      return res.status(401).json({ error: 'Invalid email or password' });
+      await handleFailedLogin(email.toLowerCase());
+      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
     // Verify password hash
-    // const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-    const isPasswordValid = true; // Replace with actual bcrypt check
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
 
     if (!isPasswordValid) {
-      await handleFailedLogin(email);
-      return res.status(401).json({ error: 'Invalid email or password' });
+      await handleFailedLogin(email.toLowerCase());
+      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
     // Reset failed logins on success
-    await resetFailedLogins(email);
+    await resetFailedLogins(email.toLowerCase());
 
     // Generate tokens
-    const accessToken = generateAccessToken(user.id, user.role);
+    const accessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
     const refreshToken = generateRefreshToken(user.id);
 
-    // Save refresh token in database
-    // await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [refreshToken, user.id]);
+    // Persist refresh token for rotation/reuse detection
+    await setRefreshToken(user.id, refreshToken);
+    setRefreshCookie(res, refreshToken);
 
-    // Send refresh token securely in an HTTP-only cookie
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true, // Prevents JavaScript from reading the cookie (XSS protection)
-      secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-      sameSite: 'strict', // CSRF protection
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    });
-
-    // Return short-lived access token in JSON body
     return res.status(200).json({
+      success: true,
       message: 'Login successful',
+      user: { id: user.id, name: user.name, email: user.email, role: user.role },
       accessToken
     });
-
   } catch (error) {
     console.error('Login error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ success: false, message: 'Internal server error during login.' });
   }
 };
 
-// 2. Refresh Token Rotation Endpoint
+// 3. Refresh Token Rotation Endpoint
 export const refreshAccessToken = async (req: Request, res: Response) => {
   try {
-    // Read the cookie sent by the browser
-    const cookies = req.cookies;
-    if (!cookies?.refreshToken) {
-      return res.status(401).json({ error: 'Unauthorized: No refresh token provided' });
+    const incomingRefreshToken = req.cookies?.refreshToken;
+    if (!incomingRefreshToken) {
+      return res.status(401).json({ success: false, message: 'Unauthorized: No refresh token provided.' });
     }
-
-    const incomingRefreshToken = cookies.refreshToken;
 
     // Verify refresh token signature
-    const decoded = jwt.verify(incomingRefreshToken, REFRESH_SECRET) as { userId: string };
+    const decoded = jwt.verify(incomingRefreshToken, REFRESH_SECRET) as { userId: number };
 
-    // Check user in database
-    // const result = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
-    // const user = result.rows[0];
+    // Look up the user and compare the stored token (reuse detection)
+    const user = await findUserById(decoded.userId);
 
-    // Placeholder mock user lookup:
-    const user = { id: decoded.userId, role: 'customer', refresh_token: incomingRefreshToken };
-
-    // If token reuse is detected (stored token doesn't match incoming token)
     if (!user || user.refresh_token !== incomingRefreshToken) {
-      // Security measure: Clear token in DB to invalidate session
-      // await pool.query('UPDATE users SET refresh_token = NULL WHERE id = $1', [decoded.userId]);
-      return res.status(403).json({ error: 'Forbidden: Invalid refresh token signature or reuse detected' });
+      // Token reuse detected or unknown user: invalidate the stored token
+      if (user) {
+        await setRefreshToken(user.id!, null);
+      }
+      return res.status(403).json({ success: false, message: 'Forbidden: Invalid refresh token or reuse detected.' });
     }
 
-    // ROTATION: Issue new access token and a brand new refresh token
-    const newAccessToken = generateAccessToken(user.id, user.role);
-    const newRefreshToken = generateRefreshToken(user.id);
+    // ROTATION: issue a new access token and a brand new refresh token
+    const newAccessToken = generateAccessToken({ id: user.id!, email: user.email, role: user.role || 'customer' });
+    const newRefreshToken = generateRefreshToken(user.id!);
 
-    // Update database with the new refresh token
-    // await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [newRefreshToken, user.id]);
+    await setRefreshToken(user.id!, newRefreshToken);
+    setRefreshCookie(res, newRefreshToken);
 
-    // Set new refresh token cookie
-    res.cookie('refreshToken', newRefreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    return res.status(200).json({ accessToken: newAccessToken });
-
+    return res.status(200).json({ success: true, accessToken: newAccessToken });
   } catch (error) {
     console.error('Refresh token error:', error);
-    return res.status(403).json({ error: 'Forbidden: Expired or invalid refresh token' });
+    return res.status(403).json({ success: false, message: 'Forbidden: Expired or invalid refresh token.' });
+  }
+};
+
+// 4. Get current authenticated user's profile
+export const getMe = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user as { id: number; email: string; role: string } | undefined;
+
+    if (!authUser) {
+      return res.status(401).json({ success: false, message: 'Unauthorized.' });
+    }
+
+    const user = await findUserById(authUser.id);
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, created_at: user.created_at }
+    });
+  } catch (error) {
+    console.error('Get profile error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
   }
 };

@@ -14,4 +14,5 @@ const pool = new Pool({
 pool.on('connect', () => {
     console.log('Connected to the database');
 });
+export { pool };
 export default pool;

@@ -4,8 +4,10 @@ import { checkoutOrder, getUserOrders, getOrderDetails } from '../controllers/or
 
 const router = Router();
 
-router.post('/checkout', verifyToken, checkoutOrder);
-router.get('/', verifyToken, getUserOrders);
-router.get('/:id', verifyToken, getOrderDetails);
+router.use(verifyToken);
+
+router.post('/checkout', checkoutOrder);
+router.get('/', getUserOrders);
+router.get('/:id', getOrderDetails);
 
 export default router;

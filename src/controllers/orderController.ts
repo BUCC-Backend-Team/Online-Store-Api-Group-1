@@ -1,81 +1,74 @@
 import { type Response } from 'express';
 import { type AuthenticatedRequest } from '../middleware/authMiddleware.js';
-import { 
-  createOrderInTransaction, 
-  getOrdersByUserId, 
-  getOrderDetailsById 
+import {
+  createOrderFromCart,
+  getOrdersByUserId,
+  getOrderDetailsById,
+  CheckoutError
 } from '../models/orderModel.js';
+
+const parseId = (value: unknown): number | null => {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+};
 
 export const checkoutOrder = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
-    }
-
-    const userId = req.user.id;
-    const { items } = req.body;
-
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ success: false, message: 'Cart is empty or invalid items provided' });
-    }
-
-    const totalAmount = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-
-    const newOrder = await createOrderInTransaction(userId, items, totalAmount);
+    const order = await createOrderFromCart(req.user!.id);
 
     res.status(201).json({
       success: true,
-      message: 'Order placed successfully!',
-      order: newOrder,
+      message: 'Order placed successfully.',
+      order: {
+        id: order.id,
+        totalAmount: Number(order.total_amount),
+        status: order.status,
+        createdAt: order.created_at
+      }
     });
-  } catch (error: any) {
+  } catch (error) {
+    if (error instanceof CheckoutError) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     console.error('Checkout error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || 'Internal server error during checkout' 
-    });
+    res.status(500).json({ success: false, message: 'Internal server error during checkout.' });
   }
 };
 
 export const getUserOrders = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
-    }
-
-    const orders = await getOrdersByUserId(req.user.id);
+    const orders = await getOrdersByUserId(req.user!.id);
 
     res.status(200).json({
       success: true,
-      orders,
+      orders: orders.map((o) => ({ ...o, total_amount: Number(o.total_amount) }))
     });
   } catch (error) {
-    console.error('Error fetching user orders:', error);
-    res.status(500).json({ success: false, message: 'Internal server error' });
+    console.error('Get orders error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error.' });
   }
 };
 
 export const getOrderDetails = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    const orderId = parseId(req.params.id);
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: 'Invalid order id.' });
     }
 
-    const orderId = parseInt(req.params.id as string, 10);
-    const isAdmin = req.user.role === 'admin';
-
-    const order = await getOrderDetailsById(orderId, req.user.id, isAdmin);
+    const isAdmin = req.user!.role === 'admin';
+    const order = await getOrderDetailsById(orderId, req.user!.id, isAdmin);
 
     if (!order) {
-      return res.status(404).json({ success: false, message: 'Order not found or access denied' });
+      return res.status(404).json({ success: false, message: 'Order not found.' });
     }
 
     res.status(200).json({
       success: true,
-      order,
+      order: { ...order, total_amount: Number(order.total_amount) }
     });
   } catch (error) {
-    console.error('Error fetching order details:', error);
-    res.status(500).json({ success: false, message: 'Internal server error' });
+    console.error('Get order details error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error.' });
   }
 };

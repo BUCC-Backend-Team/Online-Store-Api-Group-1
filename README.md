@@ -52,13 +52,13 @@ The API handles the complete customer journey from authentication and product di
 | **Authentication** | JWT-based authentication with access and refresh tokens |
 | **Account Security** | Brute-force protection and account lockout mechanisms |
 | **Product Management** | Retrieve and create products with admin authorization |
-| **Shopping Cart** | Add, view, and remove products from the current user's cart |
-| **Checkout** | Convert a user's cart into an order |
-| **Order History** | Retrieve previous orders and individual order details |
+| **Shopping Cart** | Persistent PostgreSQL-backed cart: add, update, remove, and clear items |
+| **Checkout** | Convert a user's cart into an order || **Order History** | Retrieve previous orders and individual order details |
 | **Password Security** | Password hashing using Bcrypt |
 | **HTTP Security** | Secure HTTP headers using Helmet |
 | **Request Logging** | Structured logging for application and request tracing |
 | **Caching / Lockout** | Redis integration for security-related state |
+| **Rate Limiting** | Redis-backed fixed-window limits per IP with standard rate limit headers |
 | **Type Safety** | End-to-end TypeScript development |
 
 ---
@@ -175,8 +175,10 @@ The order-processing architecture illustrates how a customer's cart moves throug
 
 | Method | Endpoint | Description |  Auth  |
 | :---: | --- | --- |:------:|
+| `POST` | `/api/auth/register` | Create an account (auto-login, returns tokens) |  None  |
 | `POST` | `/api/auth/login` | Authenticate a user |  None  |
 | `POST` | `/api/auth/refresh` | Rotate access tokens using the refresh token | Cookie |
+| `GET` | `/api/auth/me` | Get the current authenticated user's profile | Bearer Token |
 
 ### Products
 
@@ -190,14 +192,16 @@ The order-processing architecture illustrates how a customer's cart moves throug
 | Method | Endpoint | Description |     Auth     |
 | :---: | --- | --- |:------------:|
 | `GET` | `/api/cart` | View the current user's cart | Bearer Token |
-| `POST` | `/api/cart` | Add an item to the cart | Bearer Token |
-| `DELETE` | `/api/cart/:itemId` | Remove an item from the cart | Bearer Token |
+| `POST` | `/api/cart` | Add an item (`productId`, `quantity`) to the cart | Bearer Token |
+| `PUT` | `/api/cart/:productId` | Update an item's quantity | Bearer Token |
+| `DELETE` | `/api/cart/:productId` | Remove an item from the cart | Bearer Token |
+| `DELETE` | `/api/cart` | Clear the cart | Bearer Token |
 
 ### Orders
 
 | Method | Endpoint | Description |     Auth     |
 | :---: | --- | --- |:------------:|
-| `POST` | `/api/orders/checkout` | Create an order from the current cart | Bearer Token |
+| `POST` | `/api/orders/checkout` | Create an order from the current cart (no body needed) | Bearer Token |
 | `GET` | `/api/orders` | Retrieve the user's order history | Bearer Token |
 | `GET` | `/api/orders/:id` | Retrieve a specific order | Bearer Token |
 
@@ -254,29 +258,28 @@ The checkout process follows a simple cart-to-order workflow:
 User
  │
  ▼
-Shopping Cart
+Shopping Cart (PostgreSQL)
  │
  │ POST /api/orders/checkout
  ▼
-Validate Cart
+Lock cart rows + price items server-side from the products table
  │
  ▼
-Create Order
+Validate stock (atomic guard per item)
  │
  ▼
-Create Order Items
+Create order + order items
  │
  ▼
-Persist Order
+Decrement stock, clear cart
  │
  ▼
-Clear Cart
- │
- ▼
-Order History
+COMMIT (or ROLLBACK on any failure — cart is preserved)
 ```
 
-This keeps the checkout process centralized and ensures that cart contents are transformed into persistent order records.
+This keeps checkout fully transactional: prices are taken from the database
+(never trusted from the client), stock is guarded atomically, and a failed
+checkout leaves the cart intact.
 
 ---
 
@@ -341,7 +344,6 @@ cd Online-Store-API
 ```bash
 npm install
 ```
-
 ### 3. Configure environment variables
 
 Create your local environment file:
@@ -350,7 +352,7 @@ Create your local environment file:
 cp .env.example .env
 ```
 
-Then configure the required values:
+Then configure the required values (including `ADMIN_EMAIL` / `ADMIN_PASSWORD` for the seed script):
 
 ```env
 DB_HOST=localhost
@@ -361,11 +363,30 @@ DB_NAME=online_store
 
 JWT_ACCESS_SECRET=your_access_token_secret
 JWT_REFRESH_SECRET=your_refresh_token_secret
+
+ADMIN_EMAIL=admin@store.com
+ADMIN_PASSWORD=change_this_admin_password
 ```
 
 > Use strong, unique secrets in production. Never commit your `.env` file or expose JWT secrets publicly.
 
-### 4. Start the development server
+### 4. Initialize the database schema
+
+Apply the schema (tables, constraints, indexes) to your database:
+
+```bash
+npm run db:migrate
+```
+
+### 5. Seed the admin user
+
+Create the admin account from your `ADMIN_EMAIL` / `ADMIN_PASSWORD` env values (idempotent, safe to re-run):
+
+```bash
+npm run seed
+```
+
+### 6. Start the development server
 
 ```bash
 npm run dev
@@ -377,7 +398,7 @@ The API will be available at:
 http://localhost:3000
 ```
 
-### 5. Build for production
+### 7. Build for production
 
 ```bash
 npm run build
@@ -405,7 +426,37 @@ For integration tests, ensure the required PostgreSQL configuration is available
 
 ---
 
-## Example
+## Examples
+
+### Register
+
+**Request**
+
+```http
+POST /api/auth/register
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "Jane Doe",
+  "email": "jane@example.com",
+  "password": "securepassword123"
+}
+```
+
+**Response (201)**
+
+```json
+{
+  "success": true,
+  "message": "Registration successful",
+  "user": { "id": 1, "name": "Jane Doe", "email": "jane@example.com", "role": "customer" },
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+Duplicate emails return **409 Conflict**.
 
 ### Login
 
@@ -418,18 +469,27 @@ Content-Type: application/json
 
 ```json
 {
-  "email": "user@example.com",
+  "email": "jane@example.com",
   "password": "securepassword123"
 }
 ```
 
-**Response**
+**Response (200)**
 
 ```json
 {
+  "success": true,
   "message": "Login successful",
+  "user": { "id": 1, "name": "Jane Doe", "email": "jane@example.com", "role": "customer" },
   "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
+```
+
+### Current user
+
+```http
+GET /api/auth/me
+Authorization: Bearer <accessToken>
 ```
 
 The refresh token is handled through the configured refresh-token cookie.
@@ -445,10 +505,14 @@ The application includes:
 - **Bcrypt password hashing**
 - **Helmet** for secure HTTP headers
 - **Account lockout** for repeated failed authentication attempts
-- **Redis-backed temporary security state**
+- **Rate limiting** — strict limits on auth endpoints (10 req / 15 min per IP), general limits on all other API routes (100 req / 15 min per IP), with standard `RateLimit-*` and `Retry-After` headers
+- **Product caching** — cache-aside Redis cache on product list reads (60s TTL), invalidated on product creation (`X-Cache: HIT/MISS` response header)
+- **Redis-backed temporary security state** (lockout counters + rate-limit windows)
 - **Role-based access** for administrative product operations
 - **Environment-based secret management**
 - **Structured request logging**
+
+> **Note on Redis:** development uses `ioredis-mock` (in-memory, per-process). Rate-limit and lockout counters reset on server restart and are not shared across cluster nodes. Configure `REDIS_URL` and swap in a real ioredis client in `src/config/redis.ts` for production.
 
 ---
 
