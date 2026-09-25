@@ -59,6 +59,7 @@ The API handles the complete customer journey from authentication and product di
 | **HTTP Security** | Secure HTTP headers using Helmet |
 | **Request Logging** | Structured logging for application and request tracing |
 | **Caching / Lockout** | Redis integration for security-related state |
+| **Rate Limiting** | Redis-backed fixed-window limits per IP with standard rate limit headers |
 | **Type Safety** | End-to-end TypeScript development |
 
 ---
@@ -505,10 +506,13 @@ The application includes:
 - **Bcrypt password hashing**
 - **Helmet** for secure HTTP headers
 - **Account lockout** for repeated failed authentication attempts
-- **Redis-backed temporary security state**
+- **Rate limiting** — strict limits on auth endpoints (10 req / 15 min per IP), general limits on all other API routes (100 req / 15 min per IP), with standard `RateLimit-*` and `Retry-After` headers
+- **Redis-backed temporary security state** (lockout counters + rate-limit windows)
 - **Role-based access** for administrative product operations
 - **Environment-based secret management**
 - **Structured request logging**
+
+> **Note on Redis:** development uses `ioredis-mock` (in-memory, per-process). Rate-limit and lockout counters reset on server restart and are not shared across cluster nodes. Configure `REDIS_URL` and swap in a real ioredis client in `src/config/redis.ts` for production.
 
 ---
 

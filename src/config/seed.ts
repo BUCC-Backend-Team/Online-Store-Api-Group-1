@@ -1,8 +1,7 @@
 /**
  * Seeds an admin user from ADMIN_EMAIL / ADMIN_PASSWORD environment variables.
- * Idempotent: re-running updates the existing admin's password/role instead of failing.
- *
- * Usage: npm run seed
+ *  re running updates the existing admin's password/role instead of failing.
+ *  npm run seed
  */
 import 'dotenv/config';
 import bcrypt from 'bcrypt';

@@ -1,7 +1,5 @@
 import { type Request, type Response, type NextFunction } from 'express';
-import RedisMock from 'ioredis-mock';
-
-const redisClient = new RedisMock();
+import { redisClient } from '../config/redis.js';
 
 // 1. The main middleware function
 export const lockoutMiddleware = async (req: Request, res: Response, next: NextFunction) => {
