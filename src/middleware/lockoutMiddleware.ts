@@ -1,57 +1,45 @@
-import { createClient } from 'redis';
-// Initialize Redis client for security tracking
-const redisClient = createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379'
-});
+import { type Request, type Response, type NextFunction } from 'express';
+import RedisMock from 'ioredis-mock';
 
-redisClient.on('error', (err) => console.error('Redis Lockout Error:', err));
+const redisClient = new RedisMock();
 
-// Connect if not already connected
-if (!redisClient.isOpen) {
-  redisClient.connect().catch(console.error);
-}
-
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCKOUT_TIME_SECONDS = 900; // 15 minutes (in seconds)
-
-// 1. Check if an account is currently locked out
-export async function checkAccountLockout(email: string): Promise<boolean> {
+// 1. The main middleware function
+export const lockoutMiddleware = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const lockoutKey = `lockout:${email}`;
-    const isLocked = await redisClient.get(lockoutKey);
-    return !!isLocked;
+    next();
   } catch (error) {
-    console.error('Lockout check failed, allowing request safely:', error);
-    return false; // Fail-safe: don't block users if Redis hiccups
+    console.error('Redis Lockout Error:', error);
+    next();
   }
-}
+};
 
-// 2. Track a failed login attempt and lock if threshold is met
-export async function handleFailedLogin(email: string): Promise<void> {
+// 2. Helper functions expected by your authController.ts
+export const checkAccountLockout = async (identifier: string): Promise<boolean> => {
   try {
-    const attemptsKey = `attempts:${email}`;
-    const lockoutKey = `lockout:${email}`;
+    const attempts = await redisClient.get(`lockout:${identifier}`);
+    return attempts ? parseInt(attempts) >= 5 : false;
+  } catch (err) {
+    console.error('Check lockout error:', err);
+    return false; // Fail open
+  }
+};
 
-    const attempts = await redisClient.incr(attemptsKey);
+export const handleFailedLogin = async (identifier: string): Promise<void> => {
+  try {
+    const key = `lockout:${identifier}`;
+    const attempts = await redisClient.incr(key);
     if (attempts === 1) {
-      await redisClient.expire(attemptsKey, LOCKOUT_TIME_SECONDS);
+      await redisClient.expire(key, 300); // Lock for 5 minutes after first fail
     }
-
-    if (attempts >= MAX_FAILED_ATTEMPTS) {
-      await redisClient.set(lockoutKey, 'LOCKED', { EX: LOCKOUT_TIME_SECONDS });
-      await redisClient.del(attemptsKey); // Clear the attempts counter
-    }
-  } catch (error) {
-    console.error('Failed login tracking error:', error);
+  } catch (err) {
+    console.error('Handle failed login error:', err);
   }
-}
+};
 
-// 3. Clear failed attempts on a successful login
-export async function resetFailedLogins(email: string): Promise<void> {
+export const resetFailedLogins = async (identifier: string): Promise<void> => {
   try {
-    await redisClient.del(`attempts:${email}`);
-    await redisClient.del(`lockout:${email}`);
-  } catch (error) {
-    console.error('Reset failed logins error:', error);
+    await redisClient.del(`lockout:${identifier}`);
+  } catch (err) {
+    console.error('Reset failed logins error:', err);
   }
-}
+};

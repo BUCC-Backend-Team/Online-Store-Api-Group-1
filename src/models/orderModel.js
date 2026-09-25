@@ -1,33 +1,33 @@
 import pool from '../config/db.js';
-export const createOrder = async (userId, items) => {
+export const createOrderInTransaction = async (userId, items, totalAmount) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        // 1. Insert into orders table first
-        const orderResult = await client.query('INSERT INTO orders (user_id, status) VALUES ($1, $2) RETURNING *', [userId, 'pending']);
-        const newOrder = orderResult.rows[0];
-        let totalAmount = 0;
-        // 2. Loop through cart items, verify prices, stock, and insert order items
+        const orderQuery = `
+      INSERT INTO orders (user_id, total_amount, status, created_at)
+      VALUES ($1, $2, 'Pending', NOW())
+      RETURNING id, user_id, total_amount, status, created_at;
+    `;
+        const orderResult = await client.query(orderQuery, [userId, totalAmount]);
+        const orderId = orderResult.rows[0].id;
         for (const item of items) {
-            const productResult = await client.query('SELECT price, stock FROM products WHERE id = $1', [item.productId]);
-            if (productResult.rows.length === 0) {
-                throw new Error(`Product with ID ${item.productId} not found`);
-            }
-            const product = productResult.rows[0];
-            if (product.stock < item.quantity) {
+            const itemQuery = `
+        INSERT INTO order_items (order_id, product_id, quantity, price)
+        VALUES ($1, $2, $3, $4);
+      `;
+            await client.query(itemQuery, [orderId, item.productId, item.quantity, item.price]);
+            const stockQuery = `
+        UPDATE products 
+        SET stock = stock - $1 
+        WHERE id = $2 AND stock >= $1;
+      `;
+            const stockResult = await client.query(stockQuery, [item.quantity, item.productId]);
+            if (stockResult.rowCount === 0) {
                 throw new Error(`Insufficient stock for product ID ${item.productId}`);
             }
-            const itemTotal = Number(product.price) * item.quantity;
-            totalAmount += itemTotal;
-            // Insert into order_items
-            await client.query('INSERT INTO order_items (order_id, product_id, quantity) VALUES ($1, $2, $3)', [newOrder.id, item.productId, item.quantity]);
-            // Deduct stock from products table
-            await client.query('UPDATE products SET stock = stock - $1 WHERE id = $2', [item.quantity, item.productId]);
         }
-        // 3. Create a corresponding payment record matching your payments table schema
-        await client.query('INSERT INTO payments (order_id, amount, status) VALUES ($1, $2, $3)', [newOrder.id, totalAmount, 'pending']);
         await client.query('COMMIT');
-        return { ...newOrder, totalAmount };
+        return orderResult.rows[0];
     }
     catch (error) {
         await client.query('ROLLBACK');
@@ -38,7 +38,36 @@ export const createOrder = async (userId, items) => {
     }
 };
 export const getOrdersByUserId = async (userId) => {
-    const result = await pool.query('SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
+    const query = `
+    SELECT id, user_id, total_amount, status, created_at
+    FROM orders 
+    WHERE user_id = $1 
+    ORDER BY created_at DESC;
+  `;
+    const result = await pool.query(query, [userId]);
     return result.rows;
+};
+export const getOrderDetailsById = async (orderId, userId, isAdmin) => {
+    let orderQuery = `SELECT * FROM orders WHERE id = $1`;
+    const queryParams = [orderId];
+    if (!isAdmin) {
+        orderQuery += ` AND user_id = $2`;
+        queryParams.push(userId);
+    }
+    const orderResult = await pool.query(orderQuery, queryParams);
+    if (orderResult.rows.length === 0)
+        return null;
+    const order = orderResult.rows[0];
+    const itemsQuery = `
+    SELECT oi.product_id, p.name, oi.quantity, oi.price 
+    FROM order_items oi
+    JOIN products p ON oi.product_id = p.id
+    WHERE oi.order_id = $1;
+  `;
+    const itemsResult = await pool.query(itemsQuery, [orderId]);
+    return {
+        ...order,
+        items: itemsResult.rows,
+    };
 };
 //# sourceMappingURL=orderModel.js.map
