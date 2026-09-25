@@ -10,7 +10,7 @@ Built with **Node.js · Express · TypeScript · PostgreSQL · Redis**
   <a href="#-overview">Overview</a> ·
   <a href="#-features">Features</a> ·
   <a href="#-architecture">Architecture</a> ·
-  <a href="#-api-reference">API Reference</a> ·
+  <a href="https://john-ayodeji.docs.buildwithfern.com/">API Reference</a> ·
   <a href="#-quick-start">Quick Start</a> ·
   <a href="#-testing">Testing</a>
 </p>
