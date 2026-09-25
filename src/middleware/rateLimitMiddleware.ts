@@ -1,5 +1,6 @@
 import { type Request, type Response, type NextFunction } from 'express';
 import { redisClient } from '../config/redis.js';
+import { AUTH_RATE_LIMIT_WINDOW_MS, AUTH_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX } from '../config/env.js';
 
 interface RateLimiterOptions {
   /** Size of the fixed window in milliseconds */
@@ -58,16 +59,16 @@ export const rateLimiter = ({ windowMs, max, keyPrefix }: RateLimiterOptions) =>
 
 // ---- Preconfigured limiters overridable via env vars ----
 
-// Strict: brute-forceable endpoints register/login/refresh  10 requests per 15 min
+// Strict: brute-forceable endpoints register/login/refresh — 10 requests per 15 min
 export const authRateLimiter = rateLimiter({
-  windowMs: parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 min
-  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX || '10', 10),
+  windowMs: AUTH_RATE_LIMIT_WINDOW_MS, // 15 min
+  max: AUTH_RATE_LIMIT_MAX,
   keyPrefix: 'auth'
 });
 
-// General: all other API routes  100 requests per 15 min
+// General: all other API routes — 100 requests per 15 min
 export const generalRateLimiter = rateLimiter({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 min
-  max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
+  windowMs: RATE_LIMIT_WINDOW_MS, // 15 min
+  max: RATE_LIMIT_MAX,
   keyPrefix: 'general'
 });

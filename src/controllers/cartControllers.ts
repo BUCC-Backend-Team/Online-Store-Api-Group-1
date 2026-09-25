@@ -5,9 +5,9 @@ import {
   addItemToCart,
   updateCartItem,
   removeCartItem,
-  clearCart
+  clearCart,
+  CartError
 } from '../models/cartModel.js';
-import { pool } from '../config/db.js';
 
 const parseId = (value: unknown): number | null => {
   const id = Number(value);
@@ -33,9 +33,7 @@ export const getCart = async (req: AuthenticatedRequest, res: Response) => {
     console.error('Get cart error:', error);
     res.status(500).json({ success: false, message: 'Internal server error.' });
   }
-};
-
-export const addToCart = async (req: AuthenticatedRequest, res: Response) => {
+};export const addToCart = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const productId = parseId(req.body.productId);
     const quantity = req.body.quantity;
@@ -47,30 +45,14 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ success: false, message: 'quantity must be an integer between 1 and 999.' });
     }
 
-    const productResult = await pool.query(
-      `SELECT id, name, stock FROM products WHERE id = $1`,
-      [productId]
-    );
-    const product = productResult.rows[0];
-
-    if (!product) {
-      return res.status(404).json({ success: false, message: 'Product not found.' });
-    }
-
-    const existing = await getCartByUserId(req.user!.id);
-    const currentQty = existing.find((i) => i.product_id === productId)?.quantity ?? 0;
-
-    if (currentQty + quantity > product.stock) {
-      return res.status(409).json({
-        success: false,
-        message: `Insufficient stock: requested ${currentQty + quantity}, available ${product.stock}.`
-      });
-    }
-
+    // Stock check + insert happen in one transaction inside the model
     await addItemToCart(req.user!.id, productId, quantity);
 
     res.status(201).json({ success: true, message: 'Item added to cart.' });
   } catch (error) {
+    if (error instanceof CartError) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     console.error('Add to cart error:', error);
     res.status(500).json({ success: false, message: 'Internal server error.' });
   }
@@ -89,12 +71,15 @@ export const updateCart = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const updated = await updateCartItem(req.user!.id, productId, quantity);
-    if (!updated) {
+    if (updated === false) {
       return res.status(404).json({ success: false, message: 'Item not found in cart.' });
     }
 
     res.status(200).json({ success: true, message: 'Cart updated.' });
   } catch (error) {
+    if (error instanceof CartError) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     console.error('Update cart error:', error);
     res.status(500).json({ success: false, message: 'Internal server error.' });
   }
