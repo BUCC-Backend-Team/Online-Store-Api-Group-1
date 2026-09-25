@@ -175,8 +175,10 @@ The order-processing architecture illustrates how a customer's cart moves throug
 
 | Method | Endpoint | Description |  Auth  |
 | :---: | --- | --- |:------:|
+| `POST` | `/api/auth/register` | Create an account (auto-login, returns tokens) |  None  |
 | `POST` | `/api/auth/login` | Authenticate a user |  None  |
 | `POST` | `/api/auth/refresh` | Rotate access tokens using the refresh token | Cookie |
+| `GET` | `/api/auth/me` | Get the current authenticated user's profile | Bearer Token |
 
 ### Products
 
@@ -350,7 +352,7 @@ Create your local environment file:
 cp .env.example .env
 ```
 
-Then configure the required values:
+Then configure the required values (including `ADMIN_EMAIL` / `ADMIN_PASSWORD` for the seed script):
 
 ```env
 DB_HOST=localhost
@@ -361,11 +363,30 @@ DB_NAME=online_store
 
 JWT_ACCESS_SECRET=your_access_token_secret
 JWT_REFRESH_SECRET=your_refresh_token_secret
+
+ADMIN_EMAIL=admin@store.com
+ADMIN_PASSWORD=change_this_admin_password
 ```
 
 > Use strong, unique secrets in production. Never commit your `.env` file or expose JWT secrets publicly.
 
-### 4. Start the development server
+### 4. Initialize the database schema
+
+Apply the schema (tables, constraints, indexes) to your database:
+
+```bash
+npm run db:migrate
+```
+
+### 5. Seed the admin user
+
+Create the admin account from your `ADMIN_EMAIL` / `ADMIN_PASSWORD` env values (idempotent, safe to re-run):
+
+```bash
+npm run seed
+```
+
+### 6. Start the development server
 
 ```bash
 npm run dev
@@ -377,7 +398,7 @@ The API will be available at:
 http://localhost:3000
 ```
 
-### 5. Build for production
+### 7. Build for production
 
 ```bash
 npm run build
@@ -405,7 +426,37 @@ For integration tests, ensure the required PostgreSQL configuration is available
 
 ---
 
-## Example
+## Examples
+
+### Register
+
+**Request**
+
+```http
+POST /api/auth/register
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "Jane Doe",
+  "email": "jane@example.com",
+  "password": "securepassword123"
+}
+```
+
+**Response (201)**
+
+```json
+{
+  "success": true,
+  "message": "Registration successful",
+  "user": { "id": 1, "name": "Jane Doe", "email": "jane@example.com", "role": "customer" },
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+Duplicate emails return **409 Conflict**.
 
 ### Login
 
@@ -418,18 +469,27 @@ Content-Type: application/json
 
 ```json
 {
-  "email": "user@example.com",
+  "email": "jane@example.com",
   "password": "securepassword123"
 }
 ```
 
-**Response**
+**Response (200)**
 
 ```json
 {
+  "success": true,
   "message": "Login successful",
+  "user": { "id": 1, "name": "Jane Doe", "email": "jane@example.com", "role": "customer" },
   "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
+```
+
+### Current user
+
+```http
+GET /api/auth/me
+Authorization: Bearer <accessToken>
 ```
 
 The refresh token is handled through the configured refresh-token cookie.
