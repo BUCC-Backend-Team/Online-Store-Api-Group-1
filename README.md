@@ -12,12 +12,13 @@ Built with **Node.js · Express · TypeScript · PostgreSQL · Redis**
   <a href="#-architecture">Architecture</a> ·
   <a href="https://john-ayodeji.docs.buildwithfern.com/">API Reference</a> ·
   <a href="#-quick-start">Quick Start</a> ·
+  <a href="#deployment-production">Deployment</a> ·
   <a href="#-testing">Testing</a>
 </p>
 
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Express](https://img.shields.io/badge/Express.js-4.x-000000?logo=express&logoColor=white)](https://expressjs.com/)
+[![Express](https://img.shields.io/badge/Express.js-5.x-000000?logo=express&logoColor=white)](https://expressjs.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%2B-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-Cache%20%26%20Lockout-DC382D?logo=redis&logoColor=white)](https://redis.io/)
 
@@ -297,7 +298,11 @@ Online-Store-API/
 │
 ├── src/
 │   ├── config/
-│   │   └── # Application & database configuration
+│   │   ├── env.ts       # Centralized, fail-fast environment config
+│   │   ├── db.ts        # Postgres pool + startup connectivity check
+│   │   ├── redis.ts     # Redis client (real ioredis in prod, mock in dev)
+│   │   ├── schema.sql   # Database schema (tables, constraints, indexes)
+│   │   └── migrate.ts   # Node-based migration script (npm run db:migrate)
 │   │
 │   ├── controllers/
 │   │   └── # HTTP request handlers
@@ -311,8 +316,10 @@ Online-Store-API/
 │   ├── routes/
 │   │   └── # API route definitions
 │   │
+│   ├── app.ts
+│   │   # Express app: middleware, routes, 404 + error handling
 │   └── index.ts
-│       # Application entry point
+│       # Entry point: startup DB check, listen, graceful shutdown
 │
 ├── .env.example
 ├── package.json
@@ -357,20 +364,34 @@ cp .env.example .env
 Then configure the required values (including `ADMIN_EMAIL` / `ADMIN_PASSWORD` for the seed script):
 
 ```env
+PORT=3000
+NODE_ENV=development
+
+# Database
 DB_HOST=localhost
 DB_PORT=5432
 DB_USER=your_db_user
 DB_PASSWORD=your_db_password
 DB_NAME=online_store
 
+# JWT secrets
 JWT_ACCESS_SECRET=your_access_token_secret
 JWT_REFRESH_SECRET=your_refresh_token_secret
 
+# Seed admin (used by `npm run seed`)
 ADMIN_EMAIL=admin@store.com
 ADMIN_PASSWORD=change_this_admin_password
+
+# Optional
+# CORS_ORIGIN=http://localhost:5173   # comma-separated frontend origin allowlist
+# TRUST_PROXY=false                   # true only behind a reverse proxy
+# LOCKOUT_MAX_ATTEMPTS=5              # failed logins before lockout
+# LOCKOUT_WINDOW_SECONDS=900          # lockout duration (15 min)
 ```
 
 > Use strong, unique secrets in production. Never commit your `.env` file or expose JWT secrets publicly.
+
+> **Startup check:** the server verifies the database connection *before* accepting traffic. If your `DB_*` credentials are wrong, it exits immediately with a clear error instead of booting into failing requests — fix `.env` and start again.
 
 ### 4. Initialize the database schema
 
@@ -379,6 +400,8 @@ Apply the schema (tables, constraints, indexes) to your database:
 ```bash
 npm run db:migrate
 ```
+
+This runs a Node script (`src/config/migrate.ts`) — no `psql` CLI required. It creates the database if it doesn't exist (when your user has permission) and applies `schema.sql` idempotently, so it's safe to re-run.
 
 ### 5. Seed the admin user
 
@@ -400,18 +423,54 @@ The API will be available at:
 http://localhost:3000
 ```
 
+> **No Redis needed in development** — the app automatically uses `ioredis-mock` (in-memory) unless `NODE_ENV=production`. Redis is only required in production.
+
 ### 7. Build for production
 
 ```bash
-npm run build
+npm run build   # emits to dist/
+npm start       # runs node dist/index.js
 ```
 
-Then start the production server:
+---
+
+## Deployment (Production)
+
+### Required environment variables
+
+In production (`NODE_ENV=production`) the server **refuses to start** unless critical variables are set — fail-fast validation lives in `src/config/env.ts`:
+
+| Variable | Required | Description                                                       |
+| --- | :---: |-------------------------------------------------------------------|
+| `NODE_ENV` | ✅ | Set to `production` (enables secure cookies + strict validation)  |
+| `DATABASE_URL` | ✅* | Postgres connection string  alternative to the `DB_*` variables   |
+| `JWT_ACCESS_SECRET` | ✅ | Long random string, e.g. `openssl rand -hex 32`                   |
+| `JWT_REFRESH_SECRET` | ✅ | Long random string, **different** from the access secret          |
+| `REDIS_URL` | ✅ | Real Redis connection  the in-memory mock is dev-only             |
+| `TRUST_PROXY` | recommended | `true` when behind a reverse proxy (nginx, Render, Railway, Fly.io) |
+| `CORS_ORIGIN` | recommended | Comma-separated allowlist of frontend origins                     |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | first deploy | Used once by `npm run seed`                                       |
+
+* Or the `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` set.
+
+```env
+NODE_ENV=production
+TRUST_PROXY=true
+DATABASE_URL=<internal postgres URL>
+REDIS_URL=<internal redis URL>
+JWT_ACCESS_SECRET=<openssl rand -hex 32>
+JWT_REFRESH_SECRET=<openssl rand -hex 32>
+ADMIN_EMAIL=admin@store.com
+ADMIN_PASSWORD=<strong password>
+CORS_ORIGIN=https://your-frontend.example
+```
+
+5. Run migrations **once**:
 
 ```bash
-npm start
-```
-
+npx tsx src/config/migrate.ts
+npx tsx src/config/seed.ts
+````
 ---
 
 ## Testing
@@ -511,7 +570,7 @@ The application includes:
 - **Structured request logging**
 - **CORS support** — optional origin allowlist via `CORS_ORIGIN` (comma-separated), credentials enabled
 
-> **Note on Redis:** development uses `ioredis-mock` (in-memory, per-process). Rate-limit and lockout counters reset on server restart and are not shared across cluster nodes. Configure `REDIS_URL` and swap in a real ioredis client in `src/config/redis.ts` for production.
+> **Note on Redis:** development automatically uses `ioredis-mock` (in-memory, per-process) — rate-limit and lockout counters reset on server restart. In production (`NODE_ENV=production`) the app connects to a **real Redis** using `REDIS_URL`; the server refuses to start without it.
 
 ---
 
