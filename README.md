@@ -52,9 +52,8 @@ The API handles the complete customer journey from authentication and product di
 | **Authentication** | JWT-based authentication with access and refresh tokens |
 | **Account Security** | Brute-force protection and account lockout mechanisms |
 | **Product Management** | Retrieve and create products with admin authorization |
-| **Shopping Cart** | Add, view, and remove products from the current user's cart |
-| **Checkout** | Convert a user's cart into an order |
-| **Order History** | Retrieve previous orders and individual order details |
+| **Shopping Cart** | Persistent PostgreSQL-backed cart: add, update, remove, and clear items |
+| **Checkout** | Convert a user's cart into an order || **Order History** | Retrieve previous orders and individual order details |
 | **Password Security** | Password hashing using Bcrypt |
 | **HTTP Security** | Secure HTTP headers using Helmet |
 | **Request Logging** | Structured logging for application and request tracing |
@@ -193,14 +192,16 @@ The order-processing architecture illustrates how a customer's cart moves throug
 | Method | Endpoint | Description |     Auth     |
 | :---: | --- | --- |:------------:|
 | `GET` | `/api/cart` | View the current user's cart | Bearer Token |
-| `POST` | `/api/cart` | Add an item to the cart | Bearer Token |
-| `DELETE` | `/api/cart/:itemId` | Remove an item from the cart | Bearer Token |
+| `POST` | `/api/cart` | Add an item (`productId`, `quantity`) to the cart | Bearer Token |
+| `PUT` | `/api/cart/:productId` | Update an item's quantity | Bearer Token |
+| `DELETE` | `/api/cart/:productId` | Remove an item from the cart | Bearer Token |
+| `DELETE` | `/api/cart` | Clear the cart | Bearer Token |
 
 ### Orders
 
 | Method | Endpoint | Description |     Auth     |
 | :---: | --- | --- |:------------:|
-| `POST` | `/api/orders/checkout` | Create an order from the current cart | Bearer Token |
+| `POST` | `/api/orders/checkout` | Create an order from the current cart (no body needed) | Bearer Token |
 | `GET` | `/api/orders` | Retrieve the user's order history | Bearer Token |
 | `GET` | `/api/orders/:id` | Retrieve a specific order | Bearer Token |
 
@@ -257,29 +258,28 @@ The checkout process follows a simple cart-to-order workflow:
 User
  │
  ▼
-Shopping Cart
+Shopping Cart (PostgreSQL)
  │
  │ POST /api/orders/checkout
  ▼
-Validate Cart
+Lock cart rows + price items server-side from the products table
  │
  ▼
-Create Order
+Validate stock (atomic guard per item)
  │
  ▼
-Create Order Items
+Create order + order items
  │
  ▼
-Persist Order
+Decrement stock, clear cart
  │
  ▼
-Clear Cart
- │
- ▼
-Order History
+COMMIT (or ROLLBACK on any failure — cart is preserved)
 ```
 
-This keeps the checkout process centralized and ensures that cart contents are transformed into persistent order records.
+This keeps checkout fully transactional: prices are taken from the database
+(never trusted from the client), stock is guarded atomically, and a failed
+checkout leaves the cart intact.
 
 ---
 
@@ -344,7 +344,6 @@ cd Online-Store-API
 ```bash
 npm install
 ```
-
 ### 3. Configure environment variables
 
 Create your local environment file:
@@ -507,6 +506,7 @@ The application includes:
 - **Helmet** for secure HTTP headers
 - **Account lockout** for repeated failed authentication attempts
 - **Rate limiting** — strict limits on auth endpoints (10 req / 15 min per IP), general limits on all other API routes (100 req / 15 min per IP), with standard `RateLimit-*` and `Retry-After` headers
+- **Product caching** — cache-aside Redis cache on product list reads (60s TTL), invalidated on product creation (`X-Cache: HIT/MISS` response header)
 - **Redis-backed temporary security state** (lockout counters + rate-limit windows)
 - **Role-based access** for administrative product operations
 - **Environment-based secret management**

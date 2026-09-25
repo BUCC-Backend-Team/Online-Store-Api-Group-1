@@ -1,6 +1,5 @@
 -- ============================================================
--- Online Store API — PostgreSQL schema
--- Apply on a clean database:  psql -d online_store -f src/config/schema.sql
+--psql -d online_store -f src/config/schema.sql
 -- ============================================================
 
 -- ---------- USERS ----------
@@ -20,10 +19,22 @@ CREATE TABLE IF NOT EXISTS products (
   id         SERIAL PRIMARY KEY,
   name       VARCHAR(200)      NOT NULL,
   sku        VARCHAR(100)      NOT NULL UNIQUE,
-  price      NUMERIC(12, 2)    NOT NULL CHECK (price >= 0),
+  price      NUMERIC(12, 2)    NOT NULL CHECK (price > 0),
   stock      INTEGER           NOT NULL DEFAULT 0 CHECK (stock >= 0),
   created_at TIMESTAMPTZ       NOT NULL DEFAULT NOW()
 );
+
+-- ---------- CARTS (one line per cart item) ----------
+CREATE TABLE IF NOT EXISTS carts (
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id INTEGER     NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  quantity   INTEGER     NOT NULL CHECK (quantity > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_carts_user_id ON carts(user_id);
 
 -- ---------- ORDERS ----------
 CREATE TABLE IF NOT EXISTS orders (
@@ -44,11 +55,11 @@ CREATE TABLE IF NOT EXISTS order_items (
   product_id INTEGER        NOT NULL
              REFERENCES products(id) ON DELETE RESTRICT,
   quantity   INTEGER        NOT NULL CHECK (quantity > 0),
-  price      NUMERIC(12, 2) NOT NULL CHECK (price >= 0)
+  price      NUMERIC(12, 2) NOT NULL CHECK (price > 0)
 );
 
 -- ============================================================
--- Indexes (mirrors src/config/indexes.sql)
+-- Indexes
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_products_sku            ON products(sku);
 CREATE INDEX IF NOT EXISTS idx_users_email             ON users(email);
