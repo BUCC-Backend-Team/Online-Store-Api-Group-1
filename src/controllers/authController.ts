@@ -1,254 +1,129 @@
-import type { Request, Response } from 'express';
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
-import { checkAccountLockout, handleFailedLogin, resetFailedLogins } from '../middleware/lockoutMiddleware.js';
-import { createUser, findUserByEmail, findUserById, setRefreshToken } from '../models/userModel.js';
-import { JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, isProd } from '../config/env.js';
+import { CookieOptions, Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
 
-const ACCESS_SECRET = JWT_ACCESS_SECRET;
-const REFRESH_SECRET = JWT_REFRESH_SECRET;
+import HttpStatusCodes from '@src/common/constants/HttpStatusCodes';
+import EnvVars from '@src/common/constants/env';
+import {
+  ISignupInput,
+  ILoginInput,
+  toPublicUser,
+} from '@src/models/User.model';
+import {
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+  IRefreshTokenPayload,
+} from '@src/common/utils/jwt';
+import UserRepo from '@src/repos/UserRepo';
+import tokenRepo from '@src/repos/tokenRepo';
+import ApiError from '@src/common/utils/errors';
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const BCRYPT_ROUNDS = 10;
-const REFRESH_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
+const REFRESH_COOKIE = 'refresh_token';
 
-// Token payload must match what authMiddleware.verifyToken decodes: { id, email, role }
-function generateAccessToken(user: { id: number; email: string; role: string }): string {
-  return jwt.sign({ id: user.id, email: user.email, role: user.role }, ACCESS_SECRET, { expiresIn: '15m' });
+const cookieOptions = (): CookieOptions => ({
+  httpOnly: true,
+  secure: EnvVars.NodeEnv === 'production',
+  sameSite: 'strict',
+  path: '/api/auth',
+  maxAge: EnvVars.Jwt.RefreshExpiresInDays * 24 * 60 * 60 * 1000,
+});
+
+// Create tokens for a user and set the refresh cookie.
+async function issueTokens(user: { id: string; role: 'user' | 'admin' }, res: Response) {
+  const jti = tokenRepo.newJti();
+  const accessToken = signAccessToken({ sub: user.id, role: user.role });
+  const refreshToken = signRefreshToken({ sub: user.id, jti });
+  await tokenRepo.store(jti, user.id);
+  res.cookie(REFRESH_COOKIE, refreshToken, cookieOptions());
+  return accessToken;
 }
 
-function generateRefreshToken(userId: number): string {
-  return jwt.sign({ userId }, REFRESH_SECRET, { expiresIn: '7d' });
-}
+// POST /api/auth/signup
+export async function signup(req: Request, res: Response): Promise<void> {
+  const { name, email, password } = req.body as ISignupInput;
 
-function setRefreshCookie(res: Response, refreshToken: string): void {
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true, // Prevents JavaScript from reading the cookie (XSS protection)
-    secure: isProd, // HTTPS only in production
-    sameSite: 'strict', // CSRF protection
-    maxAge: REFRESH_COOKIE_MAX_AGE
+  if (await UserRepo.getByEmail(email)) {
+    throw new ApiError(HttpStatusCodes.CONFLICT, 'Email already in use');
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = await UserRepo.create(name, email, passwordHash, 'user');
+
+  const accessToken = await issueTokens(user, res);
+  res.status(HttpStatusCodes.CREATED).json({
+    status: 'success',
+    user: toPublicUser(user),
+    accessToken,
   });
 }
 
-function clearAuthCookies(res: Response): void {
-  res.clearCookie('refreshToken', {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: 'strict'
-  });
-  res.clearCookie('accessToken', {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: 'strict'
+// POST /api/auth/login
+export async function login(req: Request, res: Response): Promise<void> {
+  const { email, password } = req.body as ILoginInput;
+
+  const user = await UserRepo.getByEmail(email);
+  if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+    throw new ApiError(HttpStatusCodes.UNAUTHORIZED, 'Invalid credentials');
+  }
+
+  const accessToken = await issueTokens(user, res);
+  res.status(HttpStatusCodes.OK).json({
+    status: 'success',
+    user: toPublicUser(user),
+    accessToken,
   });
 }
 
-// 1. Register: create user, hash password, auto-login (201 + tokens)
-export const registerUser = async (req: Request, res: Response) => {
-  const { name, email, password } = req.body;
-
-  if (!name || typeof name !== 'string' || name.trim() === '') {
-    return res.status(400).json({ success: false, message: 'Name is required and must be a string.' });
+// POST /api/auth/refresh — verifies the refresh JWT AND checks Redis.
+export async function refresh(req: Request, res: Response): Promise<void> {
+  const token = req.cookies?.[REFRESH_COOKIE] as string | undefined;
+  if (!token) {
+    throw new ApiError(
+      HttpStatusCodes.UNAUTHORIZED,
+      'Refresh token missing',
+    );
   }
 
-  if (!email || typeof email !== 'string' || !EMAIL_REGEX.test(email)) {
-    return res.status(400).json({ success: false, message: 'A valid email is required.' });
-  }
-
-  if (!password || typeof password !== 'string' || password.length < 8) {
-    return res.status(400).json({ success: false, message: 'Password is required and must be at least 8 characters.' });
-  }
-
-  const normalizedEmail = email.toLowerCase().trim();
-
+  let payload: IRefreshTokenPayload;
   try {
-    // Prevent user enumeration: let the DB unique constraint be the source of truth
-    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const user = await createUser(name.trim(), normalizedEmail, passwordHash);
-
-    const accessToken = generateAccessToken({ id: user.id!, email: user.email, role: user.role || 'customer' });
-    const refreshToken = generateRefreshToken(user.id!);
-
-    await setRefreshToken(user.id!, refreshToken);
-    setRefreshCookie(res, refreshToken);
-    // Also set the access token as a cookie so verifyToken's cookie fallback works
-    res.cookie('accessToken', accessToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'strict',
-      maxAge: 15 * 60 * 1000 // matches the 15m access token expiry
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: 'Registration successful',
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
-      accessToken
-    });
-  } catch (error: any) {
-    // 23505 = PostgreSQL unique_violation (duplicate email)
-    if (error?.code === '23505') {
-      return res.status(409).json({ success: false, message: 'Email already registered.' });
-    }
-    console.error('Registration error:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error during registration.' });
-  }
-};
-
-// 2. Login Controller with Refresh Token Cookie
-export const loginUser = async (req: Request, res: Response) => {
-  const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ success: false, message: 'Email and password are required.' });
+    payload = verifyRefreshToken(token);
+  } catch {
+    throw new ApiError(HttpStatusCodes.UNAUTHORIZED, 'Invalid refresh token');
   }
 
-  try {
-    // Check account lockout via Redis
-    const isLocked = await checkAccountLockout(email.toLowerCase());
-    if (isLocked) {
-      return res.status(429).json({
-        success: false,
-        message: 'Too many failed login attempts. Account is temporarily locked for 15 minutes.'
-      });
-    }
-
-    // Look up the user by email
-    const user = await findUserByEmail(email.toLowerCase().trim());
-
-    // Same generic response for unknown email and wrong password (no user enumeration)
-    if (!user) {
-      await handleFailedLogin(email.toLowerCase());
-      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
-    }
-
-    // Verify password hash
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
-
-    if (!isPasswordValid) {
-      await handleFailedLogin(email.toLowerCase());
-      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
-    }
-
-    // Reset failed logins on success
-    await resetFailedLogins(email.toLowerCase());
-
-    // Generate tokens
-    const accessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
-    const refreshToken = generateRefreshToken(user.id);
-
-    // Persist refresh token for rotation/reuse detection
-    await setRefreshToken(user.id, refreshToken);
-    setRefreshCookie(res, refreshToken);
-    res.cookie('accessToken', accessToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'strict',
-      maxAge: 15 * 60 * 1000
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Login successful',
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
-      accessToken
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error during login.' });
+  // Single-use tokens: the old one is revoked, a new one is issued.
+  if (!(await tokenRepo.exists(payload.jti))) {
+    throw new ApiError(
+      HttpStatusCodes.UNAUTHORIZED,
+      'Refresh token revoked or expired',
+    );
   }
-};
+  await tokenRepo.revoke(payload.jti);
 
-// 3. Refresh Token Rotation Endpoint
-export const refreshAccessToken = async (req: Request, res: Response) => {
-  try {
-    const incomingRefreshToken = req.cookies?.refreshToken;
-    if (!incomingRefreshToken) {
-      return res.status(401).json({ success: false, message: 'Unauthorized: No refresh token provided.' });
-    }
-
-    // Verify refresh token signature
-    const decoded = jwt.verify(incomingRefreshToken, REFRESH_SECRET) as { userId: number };
-
-    // Look up the user and compare the stored token (reuse detection)
-    const user = await findUserById(decoded.userId);
-
-    if (!user || user.refresh_token !== incomingRefreshToken) {
-      // Token reuse detected or unknown user: invalidate the stored token
-      if (user) {
-        await setRefreshToken(user.id!, null);
-      }
-      return res.status(403).json({ success: false, message: 'Forbidden: Invalid refresh token or reuse detected.' });
-    }
-
-    // ROTATION: issue a new access token and a brand new refresh token
-    const newAccessToken = generateAccessToken({ id: user.id!, email: user.email, role: user.role || 'customer' });
-    const newRefreshToken = generateRefreshToken(user.id!);
-
-    await setRefreshToken(user.id!, newRefreshToken);
-    setRefreshCookie(res, newRefreshToken);
-    res.cookie('accessToken', newAccessToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'strict',
-      maxAge: 15 * 60 * 1000
-    });
-
-    return res.status(200).json({ success: true, accessToken: newAccessToken });
-  } catch (error) {
-    console.error('Refresh token error:', error);
-    return res.status(403).json({ success: false, message: 'Forbidden: Expired or invalid refresh token.' });
+  const user = await UserRepo.getById(payload.sub);
+  if (!user) {
+    throw new ApiError(HttpStatusCodes.UNAUTHORIZED, 'User no longer exists');
   }
-};
 
-// 4. Logout: invalidate the stored refresh token and clear cookies
-export const logoutUser = async (req: Request, res: Response) => {
-  try {
-    const incomingRefreshToken = req.cookies?.refreshToken;
+  const accessToken = await issueTokens(user, res);
+  res.status(HttpStatusCodes.OK).json({
+    status: 'success',
+    user: toPublicUser(user),
+    accessToken,
+  });
+}
 
-    if (incomingRefreshToken) {
-      try {
-        const decoded = jwt.verify(incomingRefreshToken, REFRESH_SECRET) as { userId: number };
-        // Only clear the stored token if it matches (don't invalidate a newer session)
-        const user = await findUserById(decoded.userId);
-        if (user && user.refresh_token === incomingRefreshToken) {
-          await setRefreshToken(user.id!, null);
-        }
-      } catch {
-        // Expired/invalid cookie: nothing stored to invalidate
-      }
+// POST /api/auth/logout — revokes the refresh token and clears the cookie.
+export async function logout(req: Request, res: Response): Promise<void> {
+  const token = req.cookies?.[REFRESH_COOKIE] as string | undefined;
+  if (token) {
+    try {
+      const payload = verifyRefreshToken(token);
+      await tokenRepo.revoke(payload.jti);
+    } catch {
+      // Expired/garbage cookie: nothing to revoke.
     }
-
-    clearAuthCookies(res);
-    return res.status(200).json({ success: true, message: 'Logged out successfully.' });
-  } catch (error) {
-    console.error('Logout error:', error);
-    clearAuthCookies(res);
-    return res.status(500).json({ success: false, message: 'Internal server error during logout.' });
   }
-};
-
-// 5. Get current authenticated user's profile
-export const getMe = async (req: Request, res: Response) => {
-  try {
-    const authUser = (req as any).user as { id: number; email: string; role: string } | undefined;
-
-    if (!authUser) {
-      return res.status(401).json({ success: false, message: 'Unauthorized.' });
-    }
-
-    const user = await findUserById(authUser.id);
-
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
-    }
-
-    return res.status(200).json({
-      success: true,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, created_at: user.created_at }
-    });
-  } catch (error) {
-    console.error('Get profile error:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error.' });
-  }
-};
+  res.clearCookie(REFRESH_COOKIE, cookieOptions());
+  res.status(HttpStatusCodes.OK).json({ status: 'success' });
+}
