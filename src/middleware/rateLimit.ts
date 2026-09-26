@@ -27,7 +27,7 @@ function makeStore(windowMs: number) {
       }
     },
     prefix: 'rl:',
-    expiry: Math.ceil(windowMs / 1000),
+    // expiry: Math.ceil(windowMs / 1000),
   });
 }
 
