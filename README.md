@@ -1,50 +1,173 @@
-## About
+<div align="center">
 
-This project was created with [express-generator-typescript](https://github.com/seanpmaxwell/express-generator-typescript). It requires Node.js 22.12 or newer.
+# Online Store API
 
-<p align="center">· · ·</p>
+**REST API for an e-commerce backend**
 
+[![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Express](https://img.shields.io/badge/Express-5-000000?logo=express&logoColor=white)](https://expressjs.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
+[![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white)](https://redis.io)
 
-## Available Scripts
+**[Live API](#live-api) · [Quick Start](#quick-start) · [API Reference](#api-reference)**
 
-### `npm run install:clean`
+</div>
 
-Remove the existing `node_modules/` folder, `package-lock.json`, and reinstall all library modules.
+---
 
-### `npm run dev` 
+## Features
 
-Run the server in development with hot reloading (see `package.json` for all `npm run dev` variations)<br/>
+- JWT authentication with access and refresh tokens
+- User profiles and admin user management
+- Product catalog with pagination and Redis caching
+- Persistent shopping cart with stock validation
+- Order creation, cancellation, and stock management
+- Redis-backed rate limiting
+- CORS and request validation
+- Structured JSON logging
+- Health check endpoint
 
-**IMPORTANT** development mode uses `swc` for performance reasons which DOES NOT check for typescript errors. Run `npm run typecheck` to check for type errors. NOTE: you should use your IDE to prevent most type errors.
+---
 
-### `npm test`
+## Tech Stack
 
-Run unit-tests with <a href="https://vitest.dev/guide/">vitest</a>.
+| Technology  | Purpose                   |
+| ----------- | ------------------------- |
+| Node.js 22+ | Runtime                   |
+| TypeScript  | Language                  |
+| Express 5   | API framework             |
+| PostgreSQL  | Primary database          |
+| Redis       | Caching and rate limiting |
+| JWT         | Authentication            |
+| Zod         | Validation                |
+| Vitest      | Testing                   |
 
-### `npm run lint`
+---
 
-Check for linting errors.
+## Quick Start
 
-### `npm run format`
+### Requirements
 
-Format `src/` and `tests/` with prettier.
+- Node.js 22+
+- PostgreSQL 14+
+- Redis 6+
 
-### `npm run build`
+### Installation
 
-Build the project for production.
+```bash
+git clone <repository-url>
+cd Online-Store-Api-Group-1
+npm install
+```
 
-### `npm start`
+### Environment
 
-Run the production build (Must be built first).
+```bash
+cp .env.example config/.env.development
+```
 
-### `npm run typecheck`
+Configure PostgreSQL, Redis, JWT, admin, and CORS variables in:
 
-Check for typescript errors.
+```text
+config/.env.development
+```
 
-<p align="center">· · ·</p>
+### Run
 
+```bash
+npm run dev
+```
 
-## Additional Notes
+The API runs at:
 
-- `config/.env.production` is listed in `.gitignore` so production secrets don't get committed. Keep it out of version control and provide its values through your deployment tooling.
-- The database is a JSON file (`src/repos/common/database.json`, or `dist/repos/common/database.json` in production) meant only for the demo. It's created automatically if missing and isn't safe for concurrent writes, so replace `src/repos/MockOrm.ts` with a real database before going to production.
+```text
+http://localhost:3000
+```
+
+Verify the API:
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+---
+
+## Live API
+| Resource     | URL                                       |
+| ------------ | ----------------------------------------- |
+| **Base URL** | `https://your-deployment.example.com/api` |
+| **Health**   | `GET /api/health`                         |
+| **API Docs** | `https://your-docs.example.com`           |
+
+## API Reference
+
+### Health
+
+| Method | Endpoint      | Auth | Description       |
+| ------ | ------------- | ---- | ----------------- |
+| GET    | `/api/health` | —    | API health status |
+
+### Authentication
+| Method | Endpoint            | Auth   | Description          |
+| ------ | ------------------- | ------ | -------------------- |
+| POST   | `/api/auth/signup`  | —      | Register a user      |
+| POST   | `/api/auth/login`   | —      | Login                |
+| POST   | `/api/auth/refresh` | Cookie | Refresh access token |
+| POST   | `/api/auth/logout`  | Cookie | Logout               |
+
+### Users
+| Method | Endpoint         | Auth  | Description        |
+| ------ | ---------------- | ----- | ------------------ |
+| GET    | `/api/users/me`  | User  | Get own profile    |
+| PATCH  | `/api/users/me`  | User  | Update own profile |
+| GET    | `/api/users`     | Admin | List users         |
+| GET    | `/api/users/:id` | Admin | Get user           |
+| DELETE | `/api/users/:id` | Admin | Delete user        |
+
+### Products
+| Method | Endpoint                  | Auth  | Description    |
+| ------ | ------------------------- | ----- | -------------- |
+| GET    | `/api/product?page&limit` | —     | List products  |
+| GET    | `/api/product/:id`        | —     | Get product    |
+| POST   | `/api/product`            | Admin | Create product |
+| PATCH  | `/api/product/:id`        | Admin | Update product |
+| DELETE | `/api/product/:id`        | Admin | Delete product |
+
+### Cart
+| Method | Endpoint            | Auth | Description     |
+| ------ | ------------------- | ---- | --------------- |
+| GET    | `/api/cart`         | User | Get cart        |
+| POST   | `/api/cart`         | User | Add item        |
+| PATCH  | `/api/cart/:itemId` | User | Update quantity |
+| DELETE | `/api/cart/:itemId` | User | Remove item     |
+| DELETE | `/api/cart`         | User | Clear cart      |
+
+### Orders
+| Method | Endpoint                    | Auth       | Description         |
+| ------ | --------------------------- | ---------- | ------------------- |
+| POST   | `/api/orders`               | User       | Place order         |
+| GET    | `/api/orders?page&limit`    | User/Admin | List orders         |
+| GET    | `/api/orders/:id`           | User/Admin | Get order           |
+| POST   | `/api/orders/:id/completed` | User       | Complete payment    |
+| POST   | `/api/orders/:id/cancel`    | User/Admin | Cancel order        |
+| PATCH  | `/api/orders/:id/status`    | Admin      | Update order status |
+
+---
+
+## Testing
+
+Run the test suite:
+
+```bash
+npm test
+```
+
+Other commands:
+
+```bash
+npm run lint
+npm run typecheck
+npm run build
+npm start
+```
