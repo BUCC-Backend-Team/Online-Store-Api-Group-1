@@ -1,7 +1,12 @@
-node_modules/
+**/node_modules
 dist/
-.env
-.env.*
-!.env.example
-.idea/
-*.tsbuildinfo
+**/**/*.log
+tsconfig.tsbuildinfo
+
+# Rewritten on every test run
+src/repos/common/database.test.json
+
+# Keep production secrets out of git; share values through your deploy tooling
+config/.env.production
+config/.env.development
+config/.env.test

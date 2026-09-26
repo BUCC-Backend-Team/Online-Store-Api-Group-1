@@ -1,27 +1,31 @@
-import { isProd, REDIS_URL } from './env.js';
-import { Redis } from 'ioredis';
+import { createClient } from 'redis';
 
-/**
- * Shared Redis client for the whole app (lockout + rate limiting + caching).
- *
- * - Production: real ioredis client from REDIS_URL (required in prod).
- * - Development: ioredis-mock (in-memory, per-process). Counters reset on
- *   restart and are not shared across cluster nodes.
- */
-let redisClient: Redis;
+import EnvVars from '@src/common/constants/env';
+import logger from '@src/common/utils/logger';
 
-if (isProd) {
-  if (!REDIS_URL) {
-    console.error('[redis] REDIS_URL is required in production.');
-    process.exit(1);
-  }
-  redisClient = new Redis(REDIS_URL);
-  redisClient.on('error', (err) => {
-    console.error('[redis] Redis error:', err.message);
-  });
-} else {
-  const { default: RedisMock } = await import('ioredis-mock');
-  redisClient = new RedisMock() as unknown as Redis;
+// Shared Redis client.
+const client = createClient({
+  socket: {
+    host: EnvVars.Redis.Host,
+    port: EnvVars.Redis.Port,
+  },
+  username: EnvVars.Redis.Username || undefined,
+  password: EnvVars.Redis.Password || undefined,
+  database: EnvVars.Redis.Db,
+});
+
+// Log connection errors instead of crashing the process.
+client.on('error', (err) => logger.err('Redis error:', err));
+
+// Fail fast on startup if Redis is unreachable.
+async function connectRedis(): Promise<void> {
+  await client.connect();
+  await client.ping();
 }
 
-export { redisClient };
+// Close the connection (graceful shutdown, tests).
+async function closeRedis(): Promise<void> {
+  await client.quit();
+}
+
+export default { client, connectRedis, closeRedis } as const;
