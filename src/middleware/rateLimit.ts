@@ -1,5 +1,5 @@
-import { NextFunction, Request, Response } from 'express';
-import rateLimit, { Options } from 'express-rate-limit';
+import { Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 
 import EnvVars from '@src/common/constants/env';
@@ -10,7 +10,7 @@ import redis from '@src/config/redis';
 // and multiple instances. The wrapper swallows Redis errors by returning 0
 // hits (express-rate-limit treats 0 as "no count yet" and continues) so a
 // Redis outage never takes the API down.
-function makeStore(windowMs: number) {
+function makeStore(_windowMs: number) {
   return new RedisStore({
     sendCommand: async (...args: string[]) => {
       try {
