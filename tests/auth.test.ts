@@ -39,6 +39,7 @@ vi.mock('@src/config/db', () => ({
 vi.mock('@src/config/redis', () => ({
   default: {
     client: { on: vi.fn() },
+    ensureConnected: vi.fn(),
     connectRedis: vi.fn(),
     closeRedis: vi.fn(),
   },

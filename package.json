@@ -22,9 +22,11 @@
   "dependencies": {
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
     "cross-env": "^10.1.0",
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
     "jet-env": "^1.1.6",
     "jet-logger": "3.0.0",
@@ -32,6 +34,7 @@
     "module-alias": "^2.3.4",
     "morgan": "^1.12.1",
     "pg": "^8.23.0",
+    "rate-limit-redis": "^6.0.1",
     "redis": "^6.2.1",
     "tspo": "^1.0.7",
     "zod": "^4.6.5"
@@ -41,6 +44,7 @@
     "@swc/core": "^1.16.2",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.10",

@@ -44,8 +44,8 @@ async function startServer(): Promise<void> {
     await redis.connectRedis();
     logger.imp('Redis connection established.');
   } catch (err) {
-    logger.err('Redis connection failed:', err);
-    throw err;
+    // Not fatal: cache and rate limiting degrade gracefully to the DB.
+    logger.err('Redis connection failed (continuing without cache):', err);
   }
   await runMigrations();
   await ensureAdminUser();

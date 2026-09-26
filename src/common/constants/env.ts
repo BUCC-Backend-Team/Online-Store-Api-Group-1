@@ -42,6 +42,15 @@ const EnvVars = jetEnv({
     Email: str,
     Password: str,
   },
+  RateLimit: {
+    WindowMinutes: num,
+    GeneralMax: num,
+    AuthMax: num,
+  },
+  Cors: {
+    // Comma-separated allowlist; empty = reflect any origin (dev).
+    Origins: optStr,
+  },
 });
 
 export default EnvVars;
