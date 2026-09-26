@@ -27,7 +27,7 @@ export async function check(_req: Request, res: Response): Promise<void> {
   };
 
   if (database === 'down') {
-    res.status(HttpStatusCodes.INTERNAL_SERVER_ERROR).json(payload);
+    res.status(HttpStatusCodes.SERVICE_UNAVAILABLE).json(payload);
     return;
   }
   res.status(HttpStatusCodes.OK).json(payload);

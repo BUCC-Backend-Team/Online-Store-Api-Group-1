@@ -65,7 +65,7 @@ describe('GET /api/health', () => {
 
   it('should report error with 503 when the database is down.', async () => {
     const { default: db } = await import('@src/config/db');
-    vi.mocked(db.pool.query).mockRejectedValueOnce(
+    vi.spyOn(db.pool, 'query').mockRejectedValueOnce(
       new Error('ECONNREFUSED'),
     );
 
