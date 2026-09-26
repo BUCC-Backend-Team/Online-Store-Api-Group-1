@@ -8,12 +8,15 @@ import HttpStatusCodes from '@src/common/constants/HttpStatusCodes';
 import BaseRouter from '@src/routes';
 import ApiError from '@src/common/utils/errors';
 import { requestLogger } from '@src/middleware/requestLogger';
+import corsMiddleware from '@src/middleware/cors';
+import { generalLimiter, authLimiter } from '@src/middleware/rateLimit';
 
 import EnvVars, { NodeEnvs } from './common/constants/env';
 
 const app = express();
 
 // Basic middleware
+app.use(corsMiddleware);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -29,7 +32,9 @@ if (EnvVars.NodeEnv === NodeEnvs.PRODUCTION) {
   app.use(helmet());
 }
 
-// API routes
+// API routes, with per-IP rate limiting (stricter on auth)
+app.use('/api', generalLimiter);
+app.use('/api/auth', authLimiter);
 app.use('/api', BaseRouter);
 
 // Not found

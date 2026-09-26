@@ -25,6 +25,7 @@ vi.mock('@src/config/db', () => ({
 vi.mock('@src/config/redis', () => ({
   default: {
     client: { on: vi.fn() },
+    ensureConnected: vi.fn(),
     connectRedis: vi.fn(),
     closeRedis: vi.fn(),
   },
@@ -106,17 +107,18 @@ describe('Server startup', () => {
     expect(listenSpy).not.toHaveBeenCalled();
   });
 
-  it('should fail startup when redis is unreachable.', async () => {
+  it('should still start (without cache) when redis is unreachable.', async () => {
     vi.mocked(redis.connectRedis).mockRejectedValueOnce(
       new Error('Redis is unreachable'),
     );
 
-    await expect(startServer()).rejects.toThrow('Redis is unreachable');
+    // Redis is not fatal: the API degrades to DB-only operation.
+    await startServer();
     expect(logger.err).toHaveBeenCalledWith(
-      'Redis connection failed:',
+      'Redis connection failed (continuing without cache):',
       expect.objectContaining({ message: 'Redis is unreachable' }),
     );
-    expect(listenSpy).not.toHaveBeenCalled();
+    expect(listenSpy).toHaveBeenCalled();
   });
 
   it('should close redis and the database pool on shutdown.', async () => {
