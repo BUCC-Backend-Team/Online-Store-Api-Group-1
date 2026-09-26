@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 
 import HttpStatusCodes from '@src/common/constants/HttpStatusCodes';
 import EnvVars from '@src/common/constants/env';
+import logger from '@src/common/utils/logger';
 import {
   ISignupInput,
   ILoginInput,
@@ -29,7 +30,10 @@ const cookieOptions = (): CookieOptions => ({
 });
 
 // Create tokens for a user and set the refresh cookie.
-async function issueTokens(user: { id: string; role: 'user' | 'admin' }, res: Response) {
+async function issueTokens(
+  user: { id: string; role: 'user' | 'admin' },
+  res: Response,
+) {
   const jti = tokenRepo.newJti();
   const accessToken = signAccessToken({ sub: user.id, role: user.role });
   const refreshToken = signRefreshToken({ sub: user.id, jti });
@@ -43,6 +47,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
   const { name, email, password } = req.body as ISignupInput;
 
   if (await UserRepo.getByEmail(email)) {
+    logger.warn({ type: 'security', event: 'signup_conflict', email });
     throw new ApiError(HttpStatusCodes.CONFLICT, 'Email already in use');
   }
 
@@ -50,6 +55,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
   const user = await UserRepo.create(name, email, passwordHash, 'user');
 
   const accessToken = await issueTokens(user, res);
+  logger.info({ type: 'security', event: 'signup', userId: user.id });
   res.status(HttpStatusCodes.CREATED).json({
     status: 'success',
     user: toPublicUser(user),
@@ -63,10 +69,17 @@ export async function login(req: Request, res: Response): Promise<void> {
 
   const user = await UserRepo.getByEmail(email);
   if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+    logger.warn({ type: 'security', event: 'login_failed', email });
     throw new ApiError(HttpStatusCodes.UNAUTHORIZED, 'Invalid credentials');
   }
 
   const accessToken = await issueTokens(user, res);
+  logger.info({
+    type: 'security',
+    event: 'login',
+    userId: user.id,
+    role: user.role,
+  });
   res.status(HttpStatusCodes.OK).json({
     status: 'success',
     user: toPublicUser(user),
@@ -78,21 +91,25 @@ export async function login(req: Request, res: Response): Promise<void> {
 export async function refresh(req: Request, res: Response): Promise<void> {
   const token = req.cookies?.[REFRESH_COOKIE] as string | undefined;
   if (!token) {
-    throw new ApiError(
-      HttpStatusCodes.UNAUTHORIZED,
-      'Refresh token missing',
-    );
+    logger.warn({ type: 'security', event: 'refresh_missing_cookie' });
+    throw new ApiError(HttpStatusCodes.UNAUTHORIZED, 'Refresh token missing');
   }
 
   let payload: IRefreshTokenPayload;
   try {
     payload = verifyRefreshToken(token);
   } catch {
+    logger.warn({ type: 'security', event: 'refresh_invalid_token' });
     throw new ApiError(HttpStatusCodes.UNAUTHORIZED, 'Invalid refresh token');
   }
 
   // Single-use tokens: the old one is revoked, a new one is issued.
   if (!(await tokenRepo.exists(payload.jti))) {
+    logger.warn({
+      type: 'security',
+      event: 'refresh_revoked',
+      userId: payload.sub,
+    });
     throw new ApiError(
       HttpStatusCodes.UNAUTHORIZED,
       'Refresh token revoked or expired',
@@ -102,10 +119,20 @@ export async function refresh(req: Request, res: Response): Promise<void> {
 
   const user = await UserRepo.getById(payload.sub);
   if (!user) {
+    logger.warn({
+      type: 'security',
+      event: 'refresh_deleted_user',
+      userId: payload.sub,
+    });
     throw new ApiError(HttpStatusCodes.UNAUTHORIZED, 'User no longer exists');
   }
 
   const accessToken = await issueTokens(user, res);
+  logger.info({
+    type: 'security',
+    event: 'refresh',
+    userId: user.id,
+  });
   res.status(HttpStatusCodes.OK).json({
     status: 'success',
     user: toPublicUser(user),
@@ -120,6 +147,11 @@ export async function logout(req: Request, res: Response): Promise<void> {
     try {
       const payload = verifyRefreshToken(token);
       await tokenRepo.revoke(payload.jti);
+      logger.info({
+        type: 'security',
+        event: 'logout',
+        userId: payload.sub,
+      });
     } catch {
       // Expired/garbage cookie: nothing to revoke.
     }

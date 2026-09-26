@@ -66,8 +66,8 @@ function body<T>(res: Response): T {
   return res.body as T;
 }
 
-const adminId = '11111111-1111-1111-1111-111111111111';
-const userId = '22222222-2222-2222-2222-222222222222';
+const adminId = '11111111-1111-4111-8111-111111111111';
+const userId = '22222222-2222-4222-8222-222222222222';
 
 function makeUser(over: Partial<IUser> = {}): IUser {
   return {
@@ -372,5 +372,122 @@ describe('Admin routes', () => {
 
     expect(res.status).toBe(400);
     expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it('should 400 with a field detail for a malformed user id.', async () => {
+    const { accessToken } = await loginAsAdmin();
+
+    const res = await request(app)
+      .get('/api/users/not-a-uuid')
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(400);
+    expect(errorMsg(res)).toBe('Validation failed');
+    expect(issues(res)[0]).toMatchObject({
+      field: 'id',
+      message: 'Invalid user id',
+    });
+  });
+});
+
+// ---- Validation & error response shapes ----
+
+type Issue = { field: string; message: string };
+
+function issues(res: { body: unknown }): Issue[] {
+  return (res.body as { details: Issue[] }).details ?? [];
+}
+
+function errorMsg(res: { body: unknown }): string {
+  return (res.body as { error: string }).error;
+}
+
+describe('Validation and error responses', () => {
+  it('should reject weak passwords with field details.', async () => {
+    const res = await request(app).post('/api/auth/signup').send({
+      name: 'Test User',
+      email: 'user@test.local',
+      password: 'alllowercase1',
+      passwordConfirm: 'alllowercase1',
+    });
+
+    expect(res.status).toBe(400);
+    expect(errorMsg(res)).toBe('Validation failed');
+    const pwIssue = issues(res).find((i) => i.field === 'password');
+    expect(pwIssue?.message).toMatch(/uppercase/i);
+  });
+
+  it('should reject an invalid email with a field detail.', async () => {
+    const res = await request(app).post('/api/auth/signup').send({
+      name: 'Test User',
+      email: 'not-an-email',
+      password: 'Password123',
+      passwordConfirm: 'Password123',
+    });
+
+    expect(res.status).toBe(400);
+    const emailIssue = issues(res).find((i) => i.field === 'email');
+    expect(emailIssue?.message).toMatch(/email/i);
+  });
+
+  it('should report both password rules in one response.', async () => {
+    const res = await request(app).post('/api/auth/signup').send({
+      name: 'T',
+      email: 'user@test.local',
+      password: 'short',
+      passwordConfirm: 'short',
+    });
+
+    expect(res.status).toBe(400);
+    const pwIssues = issues(res).filter((i) => i.field === 'password');
+    expect(pwIssues.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('should not leak a stack trace for unexpected errors.', async () => {
+    // Force an unexpected error inside a controller.
+    getByEmailMock.mockRejectedValue(new Error('boom: secret internals'));
+
+    const res = await request(app).post('/api/auth/login').send({
+      email: 'user@test.local',
+      password: 'Password123',
+    });
+
+    expect(res.status).toBe(500);
+    expect(res.body).toStrictEqual({ error: 'Internal Server Error' });
+    expect(JSON.stringify(res.body)).not.toMatch(/boom/);
+  });
+
+  it('should normalize signup email to lowercase.', async () => {
+    getByEmailMock.mockResolvedValue(null);
+    createMock.mockResolvedValue(
+      makeUser({ email: 'mixed@TEST.local', passwordHash: 'hash' }),
+    );
+
+    const res = await request(app).post('/api/auth/signup').send({
+      name: 'Test User',
+      email: '  Mixed@TEST.Local  ',
+      password: 'Password123',
+      passwordConfirm: 'Password123',
+    });
+
+    expect(res.status).toBe(201);
+    expect(createMock).toHaveBeenCalledWith(
+      'Test User',
+      'mixed@test.local',
+      expect.any(String),
+      'user',
+    );
+  });
+
+  it('should 400 when PATCH /me has no updatable fields.', async () => {
+    const { accessToken } = await loginAsAdmin();
+
+    const res = await request(app)
+      .patch('/api/users/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(errorMsg(res)).toBe('Validation failed');
   });
 });

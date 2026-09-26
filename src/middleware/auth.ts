@@ -9,12 +9,13 @@ export interface IAuthUser {
   role: 'user' | 'admin';
 }
 
-// Extend Express Request with the authenticated user.
+// Extend Express Request with the authenticated user and validated query.
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       user?: IAuthUser;
+      validatedQuery?: Record<string, unknown>;
     }
   }
 }
