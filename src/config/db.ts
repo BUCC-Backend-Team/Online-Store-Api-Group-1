@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 
 import EnvVars from '@src/common/constants/env';
 
@@ -27,4 +27,20 @@ async function closeDb(): Promise<void> {
   await pool.end();
 }
 
-export default { pool, connectDb, closeDb } as const;
+// Run `fn` inside a transaction; rolls back when it throws.
+async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export default { pool, connectDb, closeDb, withTransaction } as const;
