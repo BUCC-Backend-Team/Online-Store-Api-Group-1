@@ -11,7 +11,7 @@
 [![Redis](https://img.shields.io/badge/Redis-cache%20%2B%20rate%20limit-DC382D?logo=redis&logoColor=white)](https://redis.io)
 [![Tests](https://img.shields.io/badge/tests-85%2B%20passing-brightgreen)](#testing)
 
-[Live API](#-live-api) · [Postman](#-test-in-postman) · [Quick Start](#-quick-start) · [API Reference](#-api-reference) · [Docs](#-docs)
+[Live API](#-live-api) · [Postman](#-test-in-postman) · [Quick Start](#-quick-start) · [Docker](#-docker) · [API Reference](#-api-reference) · [Docs](#-docs)
 
 </div>
 
@@ -87,6 +87,97 @@ No manual migration step: on boot the app runs `src/config/schema.sql` (idempote
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` / `npm start` | Production build / run |
+| `npm run start:docker` | Production run *without* dotenv (used by the Dockerfile) |
+
+## 🐳 Docker
+
+The image is a **multi-stage build**: stage 1 installs everything and compiles TypeScript to `dist/`, stage 2 ships only `dist/` + production `node_modules` on `node:22-alpine`, running as a **non-root user**. Non-secret env defaults are baked in; secrets are injected at runtime.
+
+### Build
+
+```bash
+docker build -t online-store-api .
+```
+
+### Run
+
+```bash
+docker run -d --name online-store-api \
+  -p 3000:3000 \
+  -e DB_HOST=your-db-host \
+  -e DB_PORT=5432 \
+  -e DB_USER=postgres \
+  -e DB_PASSWORD=supersecret \
+  -e DB_NAME=online_store \
+  -e DB_SSL=true \
+  -e REDIS_HOST=your-redis-host \
+  -e REDIS_PORT=6379 \
+  -e REDIS_USERNAME=default \
+  -e REDIS_PASSWORD=supersecret \
+  -e REDIS_DB=0 \
+  -e JWT_ACCESS_SECRET=$(openssl rand -hex 32) \
+  -e JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
+  -e ADMIN_NAME=Admin \
+  -e ADMIN_EMAIL=admin@example.com \
+  -e ADMIN_PASSWORD=pick-a-strong-one \
+  -e CORS_ORIGINS=https://your-frontend.com \
+  online-store-api
+```
+
+Then check [http://localhost:3000/api/health](http://localhost:3000/api/health).
+
+### Env vars to pass at `docker run`
+
+| Variable | Required | Notes |
+|---|---|---|
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | ✅ | Postgres connection (`DB_SSL` defaults to unset — set `true` for Supabase/Neon) |
+| `REDIS_HOST` / `REDIS_PORT` | ✅ | Redis connection (cache + rate limiting) |
+| `REDIS_USERNAME` / `REDIS_PASSWORD` / `REDIS_DB` | optional | Redis Cloud uses username `default` |
+| `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | ✅ | Generate fresh per environment: `openssl rand -hex 32` |
+| `ADMIN_NAME` / `ADMIN_EMAIL` / `ADMIN_PASSWORD` | ✅ | Seeded admin account on boot |
+| `CORS_ORIGINS` | recommended | Comma-separated frontend origins (empty = reflect any origin — dev only!) |
+
+Already baked into the image (override with `-e` if needed):
+
+| Variable | Default |
+|---|---|
+| `NODE_ENV` | `production` |
+| `PORT` | `3000` |
+| `JWT_ACCESS_EXPIRES_IN` | `15m` |
+| `JWT_REFRESH_EXPIRES_IN_DAYS` | `7` |
+| `RATE_LIMIT_WINDOW_MINUTES` | `15` |
+| `RATE_LIMIT_GENERAL_MAX` | `300` |
+| `RATE_LIMIT_AUTH_MAX` | `10` |
+
+> **Note:** the container ignores `config/.env.*` files by design — secrets live only in your runtime environment (`-e` flags, compose secrets, Kubernetes Secrets, etc.). Health check: `GET /api/health` doubles as a container healthcheck endpoint.
+
+### docker-compose example
+
+```yaml
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DB_HOST: db
+      DB_PASSWORD: supersecret
+      REDIS_HOST: cache
+      JWT_ACCESS_SECRET: change-me
+      JWT_REFRESH_SECRET: change-me-too
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: pick-a-strong-one
+    depends_on:
+      - db
+      - cache
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: supersecret
+      POSTGRES_DB: online_store
+  cache:
+    image: redis:7-alpine
+```
 
 ## 🔗 Live API
 
