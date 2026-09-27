@@ -7,6 +7,7 @@ import logger from '@src/common/utils/logger';
 import HttpStatusCodes from '@src/common/constants/HttpStatusCodes';
 import BaseRouter from '@src/routes';
 import ApiError from '@src/common/utils/errors';
+import { sendError } from '@src/common/utils/apiResponse';
 import { requestLogger } from '@src/middleware/requestLogger';
 import corsMiddleware from '@src/middleware/cors';
 import { generalLimiter, authLimiter } from '@src/middleware/rateLimit';
@@ -39,9 +40,7 @@ app.use('/api', BaseRouter);
 
 // Not found
 app.use((_: Request, res: Response) => {
-  res
-    .status(HttpStatusCodes.NOT_FOUND)
-    .json({ error: 'Route not found' });
+  sendError(res, HttpStatusCodes.NOT_FOUND, 'Route not found');
 });
 
 // Error handler. `_next` must stay: Express only treats 4-arg middleware
@@ -59,9 +58,11 @@ app.use((err: Error, _: Request, res: Response, _next: NextFunction) => {
     message: err.message,
     stack: EnvVars.NodeEnv === NodeEnvs.PRODUCTION ? undefined : err.stack,
   });
-  return res
-    .status(HttpStatusCodes.INTERNAL_SERVER_ERROR)
-    .json({ error: 'Internal Server Error' });
+  return sendError(
+    res,
+    HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    'Internal Server Error',
+  );
 });
 
 export default app;

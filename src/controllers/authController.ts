@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import HttpStatusCodes from '@src/common/constants/HttpStatusCodes';
 import EnvVars from '@src/common/constants/env';
 import logger from '@src/common/utils/logger';
+import { sendSuccess } from '@src/common/utils/apiResponse';
 import {
   ISignupInput,
   ILoginInput,
@@ -56,8 +57,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
 
   const accessToken = await issueTokens(user, res);
   logger.info({ type: 'security', event: 'signup', userId: user.id });
-  res.status(HttpStatusCodes.CREATED).json({
-    status: 'success',
+  sendSuccess(res, HttpStatusCodes.CREATED, 'Signed up successfully', {
     user: toPublicUser(user),
     accessToken,
   });
@@ -80,8 +80,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     userId: user.id,
     role: user.role,
   });
-  res.status(HttpStatusCodes.OK).json({
-    status: 'success',
+  sendSuccess(res, HttpStatusCodes.OK, 'Logged in successfully', {
     user: toPublicUser(user),
     accessToken,
   });
@@ -133,8 +132,7 @@ export async function refresh(req: Request, res: Response): Promise<void> {
     event: 'refresh',
     userId: user.id,
   });
-  res.status(HttpStatusCodes.OK).json({
-    status: 'success',
+  sendSuccess(res, HttpStatusCodes.OK, 'Token refreshed successfully', {
     user: toPublicUser(user),
     accessToken,
   });
@@ -157,5 +155,5 @@ export async function logout(req: Request, res: Response): Promise<void> {
     }
   }
   res.clearCookie(REFRESH_COOKIE, cookieOptions());
-  res.status(HttpStatusCodes.OK).json({ status: 'success' });
+  sendSuccess(res, HttpStatusCodes.OK, 'Logged out successfully', null);
 }

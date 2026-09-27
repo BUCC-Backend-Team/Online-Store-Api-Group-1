@@ -21,11 +21,17 @@ export class ApiError extends Error {
     this.details = details;
   }
 
-  // JSON body for the error response.
-  public toResponse(): { error: string; details?: IFieldIssue[] } {
-    return this.details
-      ? { error: this.message, details: this.details }
-      : { error: this.message };
+  // JSON body for the error response (uniform envelope, success: false).
+  public toResponse(): {
+    success: false;
+    message: string;
+    data: Record<string, unknown> | null;
+  } {
+    return {
+      success: false,
+      message: this.message,
+      data: this.details ? { details: this.details } : null,
+    };
   }
 }
 

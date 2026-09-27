@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 
 import HttpStatusCodes from '@src/common/constants/HttpStatusCodes';
 import logger from '@src/common/utils/logger';
+import { sendSuccess } from '@src/common/utils/apiResponse';
 import {
   IAddCartItemInput,
   IUpdateCartItemInput,
@@ -12,7 +13,7 @@ import ApiError from '@src/common/utils/errors';
 // GET /api/cart
 export async function getCart(req: Request, res: Response): Promise<void> {
   const items = await CartRepo.getCart(req.user!.id);
-  res.status(HttpStatusCodes.OK).json({ items });
+  sendSuccess(res, HttpStatusCodes.OK, 'Cart retrieved successfully', { items });
 }
 
 // POST /api/cart — add an item, merging quantity when it already exists.
@@ -40,7 +41,7 @@ export async function addItem(req: Request, res: Response): Promise<void> {
     productId,
     quantity: item.quantity,
   });
-  res.status(HttpStatusCodes.CREATED).json({ item });
+  sendSuccess(res, HttpStatusCodes.CREATED, 'Item added to cart successfully', { item });
 }
 
 // PATCH /api/cart/:itemId — change quantity (owner only).
@@ -57,7 +58,7 @@ export async function updateItem(req: Request, res: Response): Promise<void> {
     );
   }
   await CartRepo.updateQuantity(item.id, quantity);
-  res.status(HttpStatusCodes.OK).json({ status: 'success' });
+  sendSuccess(res, HttpStatusCodes.OK, 'Cart item updated successfully', null);
 }
 
 // DELETE /api/cart/:itemId — remove one item (owner only).
@@ -67,11 +68,11 @@ export async function removeItem(req: Request, res: Response): Promise<void> {
     throw new ApiError(HttpStatusCodes.NOT_FOUND, 'Cart item not found');
   }
   await CartRepo.removeItem(item.id);
-  res.status(HttpStatusCodes.OK).json({ status: 'success' });
+  sendSuccess(res, HttpStatusCodes.OK, 'Cart item removed successfully', null);
 }
 
 // DELETE /api/cart — empty the cart.
 export async function clearCart(req: Request, res: Response): Promise<void> {
   await CartRepo.clearCart(req.user!.id);
-  res.status(HttpStatusCodes.OK).json({ status: 'success' });
+  sendSuccess(res, HttpStatusCodes.OK, 'Cart cleared successfully', null);
 }

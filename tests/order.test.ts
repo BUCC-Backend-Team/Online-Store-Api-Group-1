@@ -170,7 +170,7 @@ async function login(as: 'user' | 'admin' = 'user') {
     email: as === 'admin' ? 'admin@test.local' : 'user@test.local',
     password: as === 'admin' ? 'admin_password_123' : 'Password123',
   });
-  return body<{ accessToken: string }>(res).accessToken;
+  return body<{ data: { accessToken: string } }>(res).data.accessToken;
 }
 
 function body<T>(res: { body: unknown }): T {
@@ -193,7 +193,8 @@ describe('POST /api/orders (place)', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(201);
-    expect(body<{ order: IOrderWithItems }>(res).order.total).toBe('19.98');
+    expect(body<{ success: boolean }>(res).success).toBe(true);
+    expect(body<{ data: { order: IOrderWithItems } }>(res).data.order.total).toBe('19.98');
     expect(orderMock.placeFromCart).toHaveBeenCalledWith(userId, [
       { productId, quantity: 2 },
     ]);
@@ -209,7 +210,8 @@ describe('POST /api/orders (place)', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(400);
-    expect(body<{ error: string }>(res).error).toMatch(/empty/i);
+    expect(body<{ success: boolean }>(res).success).toBe(false);
+    expect(body<{ message: string }>(res).message).toMatch(/empty/i);
   });
 
   it('should 400 when stock is insufficient.', async () => {
@@ -224,7 +226,8 @@ describe('POST /api/orders (place)', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(400);
-    expect(body<{ error: string }>(res).error).toMatch(/insufficient stock/i);
+    expect(body<{ success: boolean }>(res).success).toBe(false);
+    expect(body<{ message: string }>(res).message).toMatch(/insufficient stock/i);
   });
 });
 
@@ -278,7 +281,7 @@ describe('GET /api/orders/:id', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
-    expect(body<{ order: IOrderWithItems }>(res).order.items).toHaveLength(1);
+    expect(body<{ data: { order: IOrderWithItems } }>(res).data.order.items).toHaveLength(1);
   });
 
   it('should hide other users\' orders from customers.', async () => {
@@ -335,7 +338,8 @@ describe('POST /api/orders/:id/completed', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(400);
-    expect(body<{ error: string }>(res).error).toMatch(/cannot be completed/i);
+    expect(body<{ success: boolean }>(res).success).toBe(false);
+    expect(body<{ message: string }>(res).message).toMatch(/cannot be completed/i);
   });
 
   it('should 404 for another user\'s order.', async () => {
@@ -390,7 +394,8 @@ describe('PATCH /api/orders/:id/status (admin)', () => {
       .send({ status: 'paid' });
 
     expect(res.status).toBe(400);
-    expect(body<{ error: string }>(res).error).toMatch(/cannot move order/i);
+    expect(body<{ success: boolean }>(res).success).toBe(false);
+    expect(body<{ message: string }>(res).message).toMatch(/cannot move order/i);
   });
 });
 

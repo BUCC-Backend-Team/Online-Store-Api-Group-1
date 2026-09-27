@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 
 import HttpStatusCodes from '@src/common/constants/HttpStatusCodes';
 import logger from '@src/common/utils/logger';
+import { sendSuccess } from '@src/common/utils/apiResponse';
 import {
   canTransition,
   IListOrdersQuery,
@@ -52,7 +53,7 @@ export async function place(req: Request, res: Response): Promise<void> {
     total: order.total,
     items: order.items.length,
   });
-  res.status(HttpStatusCodes.CREATED).json({ status: 'success', order });
+  sendSuccess(res, HttpStatusCodes.CREATED, 'Order placed successfully', { order });
 }
 
 // GET /api/orders — customer: their own; admin: every order.
@@ -64,7 +65,7 @@ export async function list(req: Request, res: Response): Promise<void> {
     page,
     limit,
   });
-  res.status(HttpStatusCodes.OK).json({ status: 'success', ...result });
+  sendSuccess(res, HttpStatusCodes.OK, 'Orders retrieved successfully', result);
 }
 
 // GET /api/orders/:id — customers can only read their own orders.
@@ -76,7 +77,7 @@ export async function getById(req: Request, res: Response): Promise<void> {
   ) {
     throw new ApiError(HttpStatusCodes.NOT_FOUND, 'Order not found');
   }
-  res.status(HttpStatusCodes.OK).json({ status: 'success', order });
+  sendSuccess(res, HttpStatusCodes.OK, 'Order retrieved successfully', { order });
 }
 
 // POST /api/orders/:id/completed — demo payment: pending -> paid.
@@ -98,7 +99,7 @@ export async function complete(req: Request, res: Response): Promise<void> {
     orderId: order.id,
     userId: order.userId,
   });
-  res.status(HttpStatusCodes.OK).json({ status: 'success', order: updated });
+  sendSuccess(res, HttpStatusCodes.OK, 'Order completed successfully', { order: updated });
 }
 
 // PATCH /api/orders/:id/status — admin forces pending -> paid.
@@ -123,7 +124,7 @@ export async function updateStatus(req: Request, res: Response): Promise<void> {
     to: status,
     by: req.user!.id,
   });
-  res.status(HttpStatusCodes.OK).json({ status: 'success', order: updated });
+  sendSuccess(res, HttpStatusCodes.OK, 'Order status updated successfully', { order: updated });
 }
 
 // POST /api/orders/:id/cancel — owner or admin; restores stock.
@@ -158,5 +159,5 @@ export async function cancel(req: Request, res: Response): Promise<void> {
     userId: order.userId,
     by: req.user!.id,
   });
-  res.status(HttpStatusCodes.OK).json({ status: 'success', order: updated });
+  sendSuccess(res, HttpStatusCodes.OK, 'Order cancelled successfully', { order: updated });
 }

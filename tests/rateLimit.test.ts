@@ -6,10 +6,6 @@ import { createRateLimiter } from '@src/middleware/rateLimit';
 // The limiter skips itself in test env, so this suite mirrors the limiter's
 // options on a standalone app to verify the 429 contract.
 
-function body<T>(res: { body: unknown }): T {
-  return res.body as T;
-}
-
 describe('rate limiting middleware', () => {
   it('should respond 429 with the standard JSON body once the limit is hit.', async () => {
     const app = express();
@@ -21,7 +17,9 @@ describe('rate limiting middleware', () => {
       legacyHeaders: false,
       handler: (_req, res) => {
         res.status(429).json({
-          error: 'Too many requests, please try again later',
+          success: false,
+          message: 'Too many requests, please try again later',
+          data: null,
         });
       },
     });
@@ -36,9 +34,11 @@ describe('rate limiting middleware', () => {
     // 4th is limited with our JSON shape.
     const limited = await request(app).get('/ping');
     expect(limited.status).toBe(429);
-    expect(body<{ error: string }>(limited).error).toBe(
-      'Too many requests, please try again later',
-    );
+    expect(limited.body).toStrictEqual({
+      success: false,
+      message: 'Too many requests, please try again later',
+      data: null,
+    });
     // draft-7 headers: RateLimit-Policy carries the limit.
     expect(limited.headers['ratelimit-policy']).toMatch(/3;w=/);
     expect(limited.headers['ratelimit-remaining']).toBeUndefined();

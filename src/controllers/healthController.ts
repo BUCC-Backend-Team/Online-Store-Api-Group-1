@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 
 import HttpStatusCodes from '@src/common/constants/HttpStatusCodes';
+import { sendSuccess, sendError } from '@src/common/utils/apiResponse';
 import db from '@src/config/db';
 import redis from '@src/config/redis';
 
@@ -27,8 +28,13 @@ export async function check(_req: Request, res: Response): Promise<void> {
   };
 
   if (database === 'down') {
-    res.status(HttpStatusCodes.SERVICE_UNAVAILABLE).json(payload);
+    sendError(
+      res,
+      HttpStatusCodes.SERVICE_UNAVAILABLE,
+      'Service unavailable',
+      payload,
+    );
     return;
   }
-  res.status(HttpStatusCodes.OK).json(payload);
+  sendSuccess(res, HttpStatusCodes.OK, 'Service healthy', payload);
 }

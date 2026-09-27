@@ -113,7 +113,7 @@ async function login() {
     email: 'user@test.local',
     password: 'Password123',
   });
-  return body<{ accessToken: string }>(res).accessToken;
+  return body<{ data: { accessToken: string } }>(res).data.accessToken;
 }
 
 // Typed accessors for supertest response bodies.
@@ -136,7 +136,8 @@ describe('GET /api/cart', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
-    expect(body<{ items: unknown[] }>(res).items).toHaveLength(1);
+    expect(body<{ success: boolean }>(res).success).toBe(true);
+    expect(body<{ data: { items: unknown[] } }>(res).data.items).toHaveLength(1);
     expect(cartMock.getCart).toHaveBeenCalledWith(userId);
   });
 
@@ -170,7 +171,8 @@ describe('POST /api/cart', () => {
       .send({ productId, quantity: 50 });
 
     expect(res.status).toBe(400);
-    expect(body<{ error: string }>(res).error).toMatch(/in stock/i);
+    expect(body<{ success: boolean }>(res).success).toBe(false);
+    expect(body<{ message: string }>(res).message).toMatch(/in stock/i);
   });
 
   it('should 400 for an invalid product id.', async () => {
@@ -182,7 +184,8 @@ describe('POST /api/cart', () => {
       .send({ productId: 'nope', quantity: 1 });
 
     expect(res.status).toBe(400);
-    expect(body<{ error: string }>(res).error).toBe('Validation failed');
+    expect(body<{ success: boolean }>(res).success).toBe(false);
+    expect(body<{ message: string }>(res).message).toBe('Validation failed');
   });
 });
 
