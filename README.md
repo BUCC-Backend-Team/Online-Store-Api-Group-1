@@ -10,7 +10,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 [![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white)](https://redis.io)
 
-**[Live API Docs](https://online-store-bucc-team-1.docs.buildwithfern.com) · [Quick Start](#quick-start) · [API Reference](#api-reference)**
+**[Live API Docs](https://railway.docs.buildwithfern.com/) · [Quick Start](#quick-start) · [API Reference](#api-reference)**
 
 </div>
 
