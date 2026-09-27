@@ -104,7 +104,7 @@ async function loginAsAdmin() {
   const raw = res.headers['set-cookie'] as string[] | string | undefined;
   const cookieHeader = Array.isArray(raw) ? raw[0] : raw;
   return {
-    accessToken: body<{ accessToken: string }>(res).accessToken,
+    accessToken: body<{ data: { accessToken: string } }>(res).data.accessToken,
     cookie: cookieHeader as string,
   };
 }
@@ -128,12 +128,16 @@ describe('POST /api/auth/signup', () => {
     });
 
     expect(res.status).toBe(201);
-    expect(body<{ status: string }>(res).status).toBe('success');
-    expect(body<{ user: Record<string, unknown> }>(res).user).not.toHaveProperty('passwordHash');
-    expect(body<{ accessToken: string }>(res).accessToken).toBeTruthy();
+    expect(body<{ success: boolean }>(res).success).toBe(true);
+    expect(
+      body<{ data: { user: Record<string, unknown> } }>(res).data.user,
+    ).not.toHaveProperty('passwordHash');
+    expect(body<{ data: { accessToken: string } }>(res).data.accessToken).toBeTruthy();
     expect(res.headers['set-cookie'][0]).toMatch(/refresh_token=/);
     expect(res.headers['set-cookie'][0]).toMatch(/HttpOnly/i);
-    expect(verifyAccessToken(body<{ accessToken: string }>(res).accessToken).role).toBe('user');
+    expect(
+      verifyAccessToken(body<{ data: { accessToken: string } }>(res).data.accessToken).role,
+    ).toBe('user');
     expect(tokenStoreMock).toHaveBeenCalledWith('test-jti', userId);
   });
 
@@ -167,7 +171,8 @@ describe('POST /api/auth/signup', () => {
       .send({ name: '', email: 'not-an-email', password: 'short' });
 
     expect(res.status).toBe(400);
-    expect(body<{ error: string }>(res).error).toBeTruthy();
+    expect(body<{ success: boolean }>(res).success).toBe(false);
+    expect(body<{ message: string }>(res).message).toBeTruthy();
   });
 });
 
@@ -181,8 +186,10 @@ describe('POST /api/auth/login', () => {
     });
 
     expect(res.status).toBe(200);
-    expect(body<{ accessToken: string }>(res).accessToken).toBeTruthy();
-    expect(verifyAccessToken(body<{ accessToken: string }>(res).accessToken).role).toBe('admin');
+    expect(body<{ data: { accessToken: string } }>(res).data.accessToken).toBeTruthy();
+    expect(
+      verifyAccessToken(body<{ data: { accessToken: string } }>(res).data.accessToken).role,
+    ).toBe('admin');
     expect(res.headers['set-cookie'][0]).toMatch(/refresh_token=/);
   });
 
@@ -206,6 +213,7 @@ describe('POST /api/auth/login', () => {
     });
 
     expect(res.status).toBe(401);
+    expect(body<{ success: boolean }>(res).success).toBe(false);
   });
 });
 
@@ -220,7 +228,7 @@ describe('POST /api/auth/refresh', () => {
     const res = await request(app).post('/api/auth/refresh').set('Cookie', cookie);
 
     expect(res.status).toBe(200);
-    expect(body<{ accessToken: string }>(res).accessToken).toBeTruthy();
+    expect(body<{ data: { accessToken: string } }>(res).data.accessToken).toBeTruthy();
     expect(tokenExistsMock).toHaveBeenCalledWith('test-jti');
     expect(tokenRevokeMock).toHaveBeenCalledWith('test-jti');
     expect(tokenStoreMock).toHaveBeenCalledWith('test-jti', adminId);
@@ -233,7 +241,8 @@ describe('POST /api/auth/refresh', () => {
     const res = await request(app).post('/api/auth/refresh').set('Cookie', cookie);
 
     expect(res.status).toBe(401);
-    expect(body<{ error: string }>(res).error).toMatch(/revoked/i);
+    expect(body<{ success: boolean }>(res).success).toBe(false);
+    expect(body<{ message: string }>(res).message).toMatch(/revoked/i);
   });
 
   it('should 401 without a cookie.', async () => {
@@ -257,8 +266,10 @@ describe('GET /api/users/me', () => {
       .set('Authorization', `Bearer ${accessToken}`);
 
     expect(res.status).toBe(200);
-    expect(body<{ user: Record<string, unknown> }>(res).user.id).toBe(adminId);
-    expect(body<{ user: Record<string, unknown> }>(res).user).not.toHaveProperty('passwordHash');
+    expect(body<{ data: { user: Record<string, unknown> } }>(res).data.user.id).toBe(adminId);
+    expect(
+      body<{ data: { user: Record<string, unknown> } }>(res).data.user,
+    ).not.toHaveProperty('passwordHash');
   });
 
   it('should 401 without a token.', async () => {
@@ -280,7 +291,7 @@ describe('PATCH /api/users/me', () => {
       .send({ name: 'New Name' });
 
     expect(res.status).toBe(200);
-    expect(body<{ user: Record<string, unknown> }>(res).user.name).toBe('New Name');
+    expect(body<{ data: { user: Record<string, unknown> } }>(res).data.user.name).toBe('New Name');
   });
 
   it('should 400 for an invalid email.', async () => {
@@ -308,9 +319,9 @@ describe('Admin routes', () => {
       .set('Authorization', `Bearer ${accessToken}`);
 
     expect(res.status).toBe(200);
-    expect(body<{ users: Record<string, unknown>[] }>(res).users).toHaveLength(2);
+    expect(body<{ data: { users: Record<string, unknown>[] } }>(res).data.users).toHaveLength(2);
     expect(
-      body<{ users: Record<string, unknown>[] }>(res).users[0],
+      body<{ data: { users: Record<string, unknown>[] } }>(res).data.users[0],
     ).not.toHaveProperty('passwordHash');
   });
 
@@ -323,7 +334,10 @@ describe('Admin routes', () => {
 
     const res = await request(app)
       .get('/api/users')
-      .set('Authorization', `Bearer ${body<{ accessToken: string }>(login).accessToken}`);
+      .set(
+        'Authorization',
+        `Bearer ${body<{ data: { accessToken: string } }>(login).data.accessToken}`,
+      );
 
     expect(res.status).toBe(403);
   });
@@ -337,7 +351,7 @@ describe('Admin routes', () => {
       .set('Authorization', `Bearer ${accessToken}`);
 
     expect(res.status).toBe(200);
-    expect(body<{ user: Record<string, unknown> }>(res).user.id).toBe(userId);
+    expect(body<{ data: { user: Record<string, unknown> } }>(res).data.user.id).toBe(userId);
   });
 
   it('should 404 for an unknown user id.', async () => {
@@ -396,11 +410,13 @@ describe('Admin routes', () => {
 type Issue = { field: string; message: string };
 
 function issues(res: { body: unknown }): Issue[] {
-  return (res.body as { details: Issue[] }).details ?? [];
+  return (
+    (res.body as { data: { details?: Issue[] } | null }).data?.details ?? []
+  );
 }
 
 function errorMsg(res: { body: unknown }): string {
-  return (res.body as { error: string }).error;
+  return (res.body as { message: string }).message;
 }
 
 describe('Validation and error responses', () => {
@@ -454,7 +470,11 @@ describe('Validation and error responses', () => {
     });
 
     expect(res.status).toBe(500);
-    expect(res.body).toStrictEqual({ error: 'Internal Server Error' });
+    expect(res.body).toStrictEqual({
+      success: false,
+      message: 'Internal Server Error',
+      data: null,
+    });
     expect(JSON.stringify(res.body)).not.toMatch(/boom/);
   });
 

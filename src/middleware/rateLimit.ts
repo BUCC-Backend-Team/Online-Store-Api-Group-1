@@ -4,6 +4,7 @@ import { RedisStore } from 'rate-limit-redis';
 
 import EnvVars from '@src/common/constants/env';
 import logger from '@src/common/utils/logger';
+import { sendError } from '@src/common/utils/apiResponse';
 import redis from '@src/config/redis';
 
 // Counted per IP in the shared Redis store so limits hold across restarts
@@ -39,9 +40,7 @@ function handler(req: Request, res: Response): void {
     ip: req.ip,
     path: req.originalUrl,
   });
-  res.status(429).json({
-    error: 'Too many requests, please try again later',
-  });
+  sendError(res, 429, 'Too many requests, please try again later');
 }
 
 // Factory so tests can create limiters with a small max/window.

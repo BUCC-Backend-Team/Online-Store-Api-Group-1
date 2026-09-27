@@ -72,8 +72,13 @@ describe('CORS', () => {
 
   it('should allow requests without an Origin (curl, tests).', async () => {
     // Unknown route on purpose: only asserting the request passes CORS
-    // (404 from the router, not a CORS rejection).
+    // (404 from the router, not a CORS rejection), in the uniform envelope.
     const res = await request(app).get('/api/definitely-not-a-route');
     expect(res.status).toBe(404);
+    expect(res.body).toStrictEqual({
+      success: false,
+      message: 'Route not found',
+      data: null,
+    });
   });
 });

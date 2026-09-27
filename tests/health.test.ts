@@ -35,14 +35,18 @@ describe('GET /api/health', () => {
 
     expect(res.status).toBe(200);
     const payload = body<{
-      status: string;
-      services: { database: string; cache: string };
-      timestamp: string;
+      success: boolean;
+      data: {
+        status: string;
+        services: { database: string; cache: string };
+        timestamp: string;
+      };
     }>(res);
-    expect(payload.status).toBe('ok');
-    expect(payload.services.database).toBe('up');
-    expect(payload.services.cache).toBe('up');
-    expect(payload.timestamp).toBeTruthy();
+    expect(payload.success).toBe(true);
+    expect(payload.data.status).toBe('ok');
+    expect(payload.data.services.database).toBe('up');
+    expect(payload.data.services.cache).toBe('up');
+    expect(payload.data.timestamp).toBeTruthy();
   });
 
   it('should report degraded with 200 when only the cache is down.', async () => {
@@ -55,12 +59,11 @@ describe('GET /api/health', () => {
 
     expect(res.status).toBe(200);
     const payload = body<{
-      status: string;
-      services: { database: string; cache: string };
+      data: { status: string; services: { database: string; cache: string } };
     }>(res);
-    expect(payload.status).toBe('ok');
-    expect(payload.services.database).toBe('up');
-    expect(payload.services.cache).toBe('down');
+    expect(payload.data.status).toBe('ok');
+    expect(payload.data.services.database).toBe('up');
+    expect(payload.data.services.cache).toBe('down');
   });
 
   it('should report error with 503 when the database is down.', async () => {
@@ -73,11 +76,12 @@ describe('GET /api/health', () => {
 
     expect(res.status).toBe(503);
     const payload = body<{
-      status: string;
-      services: { database: string };
+      success: boolean;
+      data: { status: string; services: { database: string } };
     }>(res);
-    expect(payload.status).toBe('error');
-    expect(payload.services.database).toBe('down');
+    expect(payload.success).toBe(false);
+    expect(payload.data.status).toBe('error');
+    expect(payload.data.services.database).toBe('down');
   });
 
   it('should not require authentication.', async () => {

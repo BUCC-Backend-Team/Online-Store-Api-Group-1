@@ -8,9 +8,23 @@ import server from '@src/server';
 
 // Spy on the real config modules so no live connections are made.
 // Hoisted so the vi.mock factories can reference them.
+// Default reply is a valid admin row so the startup admin seed succeeds
+// (lookup finds it, so no insert is attempted).
 const { queryMock } = vi.hoisted(() => ({
   queryMock: vi.fn(() =>
-    Promise.resolve({ rows: [] as unknown[], rowCount: 0 }),
+    Promise.resolve({
+      rows: [
+        {
+          id: '00000000-0000-0000-0000-000000000000',
+          name: 'Admin',
+          email: 'admin@test.local',
+          password_hash: 'hash',
+          role: 'admin',
+          created_at: new Date().toISOString(),
+        },
+      ],
+      rowCount: 1,
+    }),
   ),
 }));
 

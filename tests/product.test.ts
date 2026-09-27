@@ -92,7 +92,9 @@ function body<T>(res: { body: unknown }): T {
 }
 type Issue = { field: string; message: string };
 function issues(res: { body: unknown }): Issue[] {
-  return (res.body as { details?: Issue[] }).details ?? [];
+  return (
+    (res.body as { data: { details?: Issue[] } | null }).data?.details ?? []
+  );
 }
 
 // ---- Fixtures ----
@@ -130,7 +132,7 @@ async function loginAsAdmin() {
     email: 'admin@test.local',
     password: 'admin_password_123',
   });
-  return body<{ accessToken: string }>(res).accessToken;
+  return body<{ data: { accessToken: string } }>(res).data.accessToken;
 }
 
 beforeEach(() => {
@@ -153,11 +155,12 @@ describe('GET /api/product (public)', () => {
     const res = await request(app).get('/api/product?page=2&limit=10');
 
     expect(res.status).toBe(200);
-    expect(body<{ status: string }>(res).status).toBe('success');
-    expect(body<{ products: unknown[] }>(res).products).toHaveLength(1);
-    expect(body<{ total: number }>(res).total).toBe(1);
-    expect(body<{ page: number }>(res).page).toBe(2);
-    expect(body<{ pages: number }>(res).pages).toBe(5);
+    expect(body<{ success: boolean }>(res).success).toBe(true);
+    const data = body<{ data: { products: unknown[]; total: number; page: number; pages: number } }>(res).data;
+    expect(data.products).toHaveLength(1);
+    expect(data.total).toBe(1);
+    expect(data.page).toBe(2);
+    expect(data.pages).toBe(5);
     expect(cacheMock.list).toHaveBeenCalledWith(2, 10);
   });
 
@@ -179,7 +182,8 @@ describe('GET /api/product (public)', () => {
     const res = await request(app).get('/api/product?page=0&limit=abc');
 
     expect(res.status).toBe(400);
-    expect(body<{ error: string }>(res).error).toBe('Validation failed');
+    expect(body<{ success: boolean }>(res).success).toBe(false);
+    expect(body<{ message: string }>(res).message).toBe('Validation failed');
     const fields = issues(res).map((i) => i.field);
     expect(fields).toContain('page');
     expect(fields).toContain('limit');
@@ -200,7 +204,7 @@ describe('GET /api/product/:id (public)', () => {
     const res = await request(app).get(`/api/product/${productId}`);
 
     expect(res.status).toBe(200);
-    expect(body<{ product: Record<string, unknown> }>(res).product.id).toBe(productId);
+    expect(body<{ data: { product: Record<string, unknown> } }>(res).data.product.id).toBe(productId);
     expect(cacheMock.getById).toHaveBeenCalledWith(productId);
   });
 
@@ -233,7 +237,7 @@ describe('POST /api/product (admin)', () => {
       .send({ name: 'Widget', price: 9.99, stock: 42 });
 
     expect(res.status).toBe(201);
-    expect(body<{ product: Record<string, unknown> }>(res).product.name).toBe('Widget');
+    expect(body<{ data: { product: Record<string, unknown> } }>(res).data.product.name).toBe('Widget');
     expect(productRepoMock.create).toHaveBeenCalledWith(
       'Widget',
       null,
@@ -256,7 +260,10 @@ describe('POST /api/product (admin)', () => {
 
     const res = await request(app)
       .post('/api/product')
-      .set('Authorization', `Bearer ${body<{ accessToken: string }>(login).accessToken}`)
+      .set(
+        'Authorization',
+        `Bearer ${body<{ data: { accessToken: string } }>(login).data.accessToken}`,
+      )
       .send({ name: 'Widget', price: 9.99, stock: 42 });
 
     expect(res.status).toBe(403);
@@ -307,7 +314,7 @@ describe('PATCH /api/product/:id (admin)', () => {
       .send({ stock: 7 });
 
     expect(res.status).toBe(200);
-    expect(body<{ product: Record<string, unknown> }>(res).product.stock).toBe(7);
+    expect(body<{ data: { product: Record<string, unknown> } }>(res).data.product.stock).toBe(7);
     expect(productRepoMock.update).toHaveBeenCalledWith(productId, {
       stock: 7,
     });

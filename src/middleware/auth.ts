@@ -3,6 +3,7 @@ import { NextFunction, Request, Response } from 'express';
 import HttpStatusCodes from '@src/common/constants/HttpStatusCodes';
 import { UserRoles } from '@src/models/User.model';
 import { verifyAccessToken } from '@src/common/utils/jwt';
+import ApiError from '@src/common/utils/errors';
 
 export interface IAuthUser {
   id: string;
@@ -23,38 +24,37 @@ declare global {
 // Require a valid bearer access token.
 export function requireAuth(
   req: Request,
-  res: Response,
+  _res: Response,
   next: NextFunction,
 ): void {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
-    res.status(HttpStatusCodes.UNAUTHORIZED).json({
-      error: 'Missing or invalid Authorization header',
-    });
-    return;
+    return next(
+      new ApiError(
+        HttpStatusCodes.UNAUTHORIZED,
+        'Missing or invalid Authorization header',
+      ),
+    );
   }
   try {
     const payload = verifyAccessToken(header.slice('Bearer '.length));
     req.user = { id: payload.sub, role: payload.role };
     next();
   } catch {
-    res
-      .status(HttpStatusCodes.UNAUTHORIZED)
-      .json({ error: 'Invalid or expired token' });
+    next(new ApiError(HttpStatusCodes.UNAUTHORIZED, 'Invalid or expired token'));
   }
 }
 
 // Require an admin access token. Must run after requireAuth.
 export function requireAdmin(
   req: Request,
-  res: Response,
+  _res: Response,
   next: NextFunction,
 ): void {
   if (req.user?.role !== UserRoles.ADMIN) {
-    res
-      .status(HttpStatusCodes.FORBIDDEN)
-      .json({ error: 'Admin access required' });
-    return;
+    return next(
+      new ApiError(HttpStatusCodes.FORBIDDEN, 'Admin access required'),
+    );
   }
   next();
 }

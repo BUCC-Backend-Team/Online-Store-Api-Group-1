@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 
 import HttpStatusCodes from '@src/common/constants/HttpStatusCodes';
 import logger from '@src/common/utils/logger';
+import { sendSuccess } from '@src/common/utils/apiResponse';
 import {
   ICreateProductInput,
   IUpdateProductInput,
@@ -15,7 +16,12 @@ import ApiError from '@src/common/utils/errors';
 export async function list(req: Request, res: Response): Promise<void> {
   const { page, limit } = req.validatedQuery as unknown as IListProductsQuery;
   const result = await productCache.list(page, limit);
-  res.status(HttpStatusCodes.OK).json({ status: 'success', ...result });
+  sendSuccess(
+    res,
+    HttpStatusCodes.OK,
+    'Products retrieved successfully',
+    result,
+  );
 }
 
 // GET /api/product/:id — public, Redis-cached.
@@ -24,7 +30,9 @@ export async function getById(req: Request, res: Response): Promise<void> {
   if (!product) {
     throw new ApiError(HttpStatusCodes.NOT_FOUND, 'Product not found');
   }
-  res.status(HttpStatusCodes.OK).json({ status: 'success', product });
+  sendSuccess(res, HttpStatusCodes.OK, 'Product retrieved successfully', {
+    product,
+  });
 }
 
 // POST /api/product — admin.
@@ -43,7 +51,9 @@ export async function create(req: Request, res: Response): Promise<void> {
     productId: product.id,
     by: req.user!.id,
   });
-  res.status(HttpStatusCodes.CREATED).json({ status: 'success', product });
+  sendSuccess(res, HttpStatusCodes.CREATED, 'Product created successfully', {
+    product,
+  });
 }
 
 // PATCH /api/product/:id — admin.
@@ -62,7 +72,9 @@ export async function update(req: Request, res: Response): Promise<void> {
     by: req.user!.id,
     fields: Object.keys(fields),
   });
-  res.status(HttpStatusCodes.OK).json({ status: 'success', product });
+  sendSuccess(res, HttpStatusCodes.OK, 'Product updated successfully', {
+    product,
+  });
 }
 
 // DELETE /api/product/:id — admin.
@@ -79,5 +91,5 @@ export async function remove(req: Request, res: Response): Promise<void> {
     productId: id,
     by: req.user!.id,
   });
-  res.status(HttpStatusCodes.OK).json({ status: 'success' });
+  sendSuccess(res, HttpStatusCodes.OK, 'Product deleted successfully', null);
 }
